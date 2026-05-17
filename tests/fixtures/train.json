@@ -1,0 +1,11 @@
+[
+  {
+    "token": ["The", "food", "was", "excellent", "."],
+    "pos": ["DT", "NN", "VBD", "JJ", "."],
+    "head": [2, 4, 4, 0, 4],
+    "deprel": ["det", "nsubj", "cop", "ROOT", "punct"],
+    "aspects": [
+      {"term": ["food"], "from": 1, "to": 2, "polarity": "positive"}
+    ]
+  }
+]

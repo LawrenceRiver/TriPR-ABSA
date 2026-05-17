@@ -1,0 +1,7 @@
+{
+  "metadata": {"split": "train", "provider": "offline"},
+  "prior": [
+    {"phrase": "excellent", "polarity": 1, "intensity": 0.9, "dimension": "quality"},
+    {"phrase": "awful", "polarity": -1, "intensity": 0.9, "dimension": "quality"}
+  ]
+}

@@ -72,6 +72,83 @@ EXPECTED_EXPERIMENTS = [
     },
 ]
 
+EXPECTED_MULTI_BACKBONE = {
+    "id": "multi_backbone",
+    "dataset": "SemEval-2014 Restaurant",
+    "split": "test",
+    "aggregation": "reported model evaluations; most rows use one checkpoint",
+    "source": "internal project evaluation: multi-backbone compatibility table",
+    "limitations": "Adapter-compatibility evidence, not a multi-seed model leaderboard.",
+    "metric_definition": METRIC_DEFINITION,
+    "release_status": "reported, not rerun during release preparation",
+    "rows": [
+        {
+            "name": "text-gt-bert",
+            "accuracy": 0.8647,
+            "macro_f1": 0.8088,
+            "best_strategy": "all",
+            "residual_accuracy": 0.8702,
+            "residual_macro_f1": 0.8171,
+        },
+        {
+            "name": "text-gt",
+            "accuracy": 0.8186,
+            "macro_f1": 0.7419,
+            "best_strategy": "fact+comparison",
+            "residual_accuracy": 0.8257,
+            "residual_macro_f1": 0.7617,
+        },
+        {
+            "name": "text-tg",
+            "accuracy": 0.8195,
+            "macro_f1": 0.7260,
+            "best_strategy": "fact+comparison",
+            "residual_accuracy": 0.8329,
+            "residual_macro_f1": 0.7610,
+        },
+        {
+            "name": "text-gin",
+            "accuracy": 0.8034,
+            "macro_f1": 0.7339,
+            "best_strategy": "fact+comparison",
+            "residual_accuracy": 0.8097,
+            "residual_macro_f1": 0.7530,
+        },
+        {
+            "name": "text-transformer",
+            "accuracy": 0.8097,
+            "macro_f1": 0.7153,
+            "best_strategy": "all",
+            "residual_accuracy": 0.8195,
+            "residual_macro_f1": 0.7474,
+        },
+        {
+            "name": "gnn-transformer",
+            "accuracy": 0.8088,
+            "macro_f1": 0.7046,
+            "best_strategy": "all",
+            "residual_accuracy": 0.8275,
+            "residual_macro_f1": 0.7433,
+        },
+        {
+            "name": "transformer-gnn",
+            "accuracy": 0.8070,
+            "macro_f1": 0.7284,
+            "best_strategy": "all",
+            "residual_accuracy": 0.8123,
+            "residual_macro_f1": 0.7494,
+        },
+        {
+            "name": "parallel-gt",
+            "accuracy": 0.8275,
+            "macro_f1": 0.7514,
+            "best_strategy": "fact+comparison",
+            "residual_accuracy": 0.8365,
+            "residual_macro_f1": 0.7737,
+        },
+    ],
+}
+
 
 def test_reported_metrics_have_provenance() -> None:
     data = json.loads(RESULTS.read_text(encoding="utf-8"))
@@ -79,7 +156,7 @@ def test_reported_metrics_have_provenance() -> None:
     assert data["class_order"] == ["positive", "negative", "neutral"]
     assert [experiment["id"] for experiment in data["experiments"]] == [
         expected["id"] for expected in EXPECTED_EXPERIMENTS
-    ]
+    ] + [EXPECTED_MULTI_BACKBONE["id"]]
 
     for experiment, expected in zip(data["experiments"], EXPECTED_EXPERIMENTS):
         assert experiment["dataset"]
@@ -102,6 +179,8 @@ def test_reported_metrics_have_provenance() -> None:
         for row in experiment["rows"]:
             assert 0 <= row["accuracy"] <= 1
             assert 0 <= row["macro_f1"] <= 1
+
+    assert data["experiments"][-1] == EXPECTED_MULTI_BACKBONE
 
 
 def test_primary_result_matches_course_paper() -> None:

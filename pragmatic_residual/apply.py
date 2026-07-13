@@ -40,18 +40,14 @@ def _as_tuple(modules: Iterable[str] | None) -> tuple[str, ...]:
     return selected
 
 
-def apply_pragmatic_residual(
+def _apply_selected_modules(
     logits: torch.Tensor,
     sample: dict[str, Any],
-    modules: Iterable[str] | None = None,
-    prior: Mapping[str, Mapping[str, Any]] | None = None,
-    intensity_params: Mapping[str, float] | None = None,
-    return_details: bool = False,
+    selected: tuple[str, ...],
+    prior: Mapping[str, Mapping[str, Any]] | None,
+    intensity_params: Mapping[str, float] | None,
+    return_details: bool,
 ) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
-    """Apply selected residual modules to one sample's logits."""
-    _validate_logits(logits)
-    _validate_sample(sample)
-    selected = _as_tuple(modules)
     final_logits = logits.clone()
     details: dict[str, Any] = {
         "modules": list(selected),
@@ -94,6 +90,28 @@ def apply_pragmatic_residual(
     return final_logits
 
 
+def apply_pragmatic_residual(
+    logits: torch.Tensor,
+    sample: dict[str, Any],
+    modules: Iterable[str] | None = None,
+    prior: Mapping[str, Mapping[str, Any]] | None = None,
+    intensity_params: Mapping[str, float] | None = None,
+    return_details: bool = False,
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
+    """Apply selected residual modules to one sample's logits."""
+    _validate_logits(logits)
+    _validate_sample(sample)
+    selected = _as_tuple(modules)
+    return _apply_selected_modules(
+        logits,
+        sample,
+        selected,
+        prior,
+        intensity_params,
+        return_details,
+    )
+
+
 def apply_batch(
     logits: torch.Tensor,
     samples: Sequence[dict[str, Any]],
@@ -104,6 +122,7 @@ def apply_batch(
 ) -> torch.Tensor | tuple[torch.Tensor, list[dict[str, Any]]]:
     """Apply pragmatic residuals to a batch of logits and parsed samples."""
     _validate_logits(logits)
+    selected = _as_tuple(modules)
     if logits.ndim != 2 or logits.shape[-1] != 3:
         raise ValueError("batch logits must have shape [batch, 3]")
     if len(samples) != logits.shape[0]:
@@ -111,16 +130,22 @@ def apply_batch(
     for sample in samples:
         _validate_sample(sample)
 
+    if logits.shape[0] == 0:
+        empty = logits.clone()
+        if return_details:
+            return empty, []
+        return empty
+
     adjusted = []
     all_details = []
     for row_logits, sample in zip(logits, samples):
-        result = apply_pragmatic_residual(
+        result = _apply_selected_modules(
             row_logits,
             sample,
-            modules=modules,
-            prior=prior,
-            intensity_params=intensity_params,
-            return_details=return_details,
+            selected,
+            prior,
+            intensity_params,
+            return_details,
         )
         if return_details:
             final_logits, details = result

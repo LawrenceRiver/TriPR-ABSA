@@ -1,3 +1,6 @@
+import sys
+from types import ModuleType
+
 import pytest
 import torch
 
@@ -44,3 +47,47 @@ def test_empty_module_set_is_identity() -> None:
     logits = torch.tensor([0.2, 0.5, 0.3])
     adjusted = apply_pragmatic_residual(logits, VALID_SAMPLE, modules=())
     assert torch.equal(adjusted, logits)
+
+
+def test_batch_reuses_one_shot_module_iterable(monkeypatch: pytest.MonkeyPatch) -> None:
+    fact_module = ModuleType("pragmatic_residual.fact")
+    calls = []
+
+    def fact_residual(
+        sample: dict[str, object], probs: torch.Tensor
+    ) -> tuple[torch.Tensor, list[object]]:
+        calls.append(sample)
+        return torch.zeros_like(probs), []
+
+    fact_module.fact_residual = fact_residual
+    monkeypatch.setitem(sys.modules, "pragmatic_residual.fact", fact_module)
+
+    logits = torch.tensor([[0.2, 0.5, 0.3], [0.1, 0.3, 0.6]])
+    adjusted = apply_batch(logits, [VALID_SAMPLE, VALID_SAMPLE], modules=iter(("fact",)))
+
+    assert len(calls) == 2
+    assert torch.equal(adjusted, logits)
+
+
+def test_empty_batch_rejects_unknown_module() -> None:
+    with pytest.raises(ValueError, match="Unknown pragmatic residual modules"):
+        apply_batch(torch.empty((0, 3)), [], modules=("unknown",))
+
+
+def test_empty_batch_returns_clone() -> None:
+    logits = torch.empty((0, 3))
+    adjusted = apply_batch(logits, [], modules=())
+
+    assert adjusted is not logits
+    assert adjusted.shape == (0, 3)
+    assert torch.equal(adjusted, logits)
+
+
+def test_empty_batch_returns_empty_details() -> None:
+    logits = torch.empty((0, 3))
+    adjusted, details = apply_batch(logits, [], modules=(), return_details=True)
+
+    assert adjusted is not logits
+    assert adjusted.shape == (0, 3)
+    assert torch.equal(adjusted, logits)
+    assert details == []

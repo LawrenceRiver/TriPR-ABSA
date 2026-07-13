@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "class_order": ["positive", "negative", "neutral"],
+  "experiments": [
+    {
+      "id": "restaurant_strategy",
+      "dataset": "SemEval-2014 Restaurant",
+      "split": "test",
+      "aggregation": "mean of three selected checkpoints",
+      "source": "internal project evaluation: strategy ablation table and selected-checkpoint summary",
+      "limitations": "Reported release evidence; full GPU rerun is not part of unit CI.",
+      "metric_definition": {
+        "accuracy": "correct predictions divided by all test examples",
+        "macro_f1": "unweighted mean of per-class F1"
+      },
+      "release_status": "reported, not rerun during release preparation",
+      "rows": [
+        {"name": "baseline", "accuracy": 0.8382, "macro_f1": 0.7480},
+        {"name": "fact", "accuracy": 0.8406, "macro_f1": 0.7522},
+        {"name": "comparison", "accuracy": 0.8394, "macro_f1": 0.7499},
+        {"name": "intensity", "accuracy": 0.8388, "macro_f1": 0.7488},
+        {"name": "fact+comparison", "accuracy": 0.8418, "macro_f1": 0.7541},
+        {"name": "all", "accuracy": 0.8424, "macro_f1": 0.7547}
+      ]
+    },
+    {
+      "id": "laptop_strategy",
+      "dataset": "SemEval-2014 Laptop",
+      "split": "test",
+      "aggregation": "reported checkpoint evaluation",
+      "source": "internal project evaluation: Laptop cross-domain strategy ablation",
+      "limitations": "Small changes; not evidence of universal cross-domain improvement.",
+      "metric_definition": {
+        "accuracy": "correct predictions divided by all test examples",
+        "macro_f1": "unweighted mean of per-class F1"
+      },
+      "release_status": "reported, not rerun during release preparation",
+      "rows": [
+        {"name": "baseline", "accuracy": 0.8022, "macro_f1": 0.7701},
+        {"name": "fact", "accuracy": 0.7991, "macro_f1": 0.7676},
+        {"name": "comparison", "accuracy": 0.8038, "macro_f1": 0.7724},
+        {"name": "intensity", "accuracy": 0.8022, "macro_f1": 0.7703},
+        {"name": "fact+comparison", "accuracy": 0.8006, "macro_f1": 0.7700},
+        {"name": "all", "accuracy": 0.8022, "macro_f1": 0.7714}
+      ]
+    },
+    {
+      "id": "twitter_strategy",
+      "dataset": "Twitter ABSA",
+      "split": "test",
+      "aggregation": "reported checkpoint evaluation",
+      "source": "internal project evaluation: Twitter cross-domain strategy ablation",
+      "limitations": "Fact is the best reported module; the full combination is approximately neutral.",
+      "metric_definition": {
+        "accuracy": "correct predictions divided by all test examples",
+        "macro_f1": "unweighted mean of per-class F1"
+      },
+      "release_status": "reported, not rerun during release preparation",
+      "rows": [
+        {"name": "baseline", "accuracy": 0.7578, "macro_f1": 0.7450},
+        {"name": "fact", "accuracy": 0.7592, "macro_f1": 0.7463},
+        {"name": "comparison", "accuracy": 0.7563, "macro_f1": 0.7439},
+        {"name": "intensity", "accuracy": 0.7548, "macro_f1": 0.7447},
+        {"name": "fact+comparison", "accuracy": 0.7578, "macro_f1": 0.7452},
+        {"name": "all", "accuracy": 0.7548, "macro_f1": 0.7449}
+      ]
+    }
+  ]
+}

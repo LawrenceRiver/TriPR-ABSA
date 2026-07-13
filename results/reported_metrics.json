@@ -8,7 +8,7 @@
       "split": "test",
       "aggregation": "mean of three selected checkpoints",
       "source": "internal project evaluation: strategy ablation table and selected-checkpoint summary",
-      "limitations": "Reported release evidence; full GPU rerun is not part of unit CI.",
+      "limitations": "Reported result from 3 selected checkpoints; not independently rerun during release preparation and not a state-of-the-art claim.",
       "metric_definition": {
         "accuracy": "correct predictions divided by all test examples",
         "macro_f1": "unweighted mean of per-class F1"
@@ -27,9 +27,9 @@
       "id": "laptop_strategy",
       "dataset": "SemEval-2014 Laptop",
       "split": "test",
-      "aggregation": "reported checkpoint evaluation",
+      "aggregation": "single checkpoint; no cross-checkpoint aggregation",
       "source": "internal project evaluation: Laptop cross-domain strategy ablation",
-      "limitations": "Small changes; not evidence of universal cross-domain improvement.",
+      "limitations": "Single-checkpoint preliminary cross-domain evidence with mixed, small changes; not evidence of universal improvement and not a state-of-the-art claim.",
       "metric_definition": {
         "accuracy": "correct predictions divided by all test examples",
         "macro_f1": "unweighted mean of per-class F1"
@@ -48,9 +48,9 @@
       "id": "twitter_strategy",
       "dataset": "Twitter ABSA",
       "split": "test",
-      "aggregation": "reported checkpoint evaluation",
+      "aggregation": "single checkpoint; no cross-checkpoint aggregation",
       "source": "internal project evaluation: Twitter cross-domain strategy ablation",
-      "limitations": "Fact is the best reported module; the full combination is approximately neutral.",
+      "limitations": "Single-checkpoint preliminary cross-domain evidence: fact is best; all is approximately neutral in macro-F1 while accuracy decreases; not evidence of universal improvement and not a state-of-the-art claim.",
       "metric_definition": {
         "accuracy": "correct predictions divided by all test examples",
         "macro_f1": "unweighted mean of per-class F1"

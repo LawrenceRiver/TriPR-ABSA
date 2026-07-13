@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import os
+import ssl
 import subprocess
 import sys
 import urllib.error
@@ -195,33 +196,71 @@ def test_http_retry_count_is_bounded(monkeypatch) -> None:
 
 def test_http_errors_do_not_echo_response_or_request_secrets(monkeypatch, capsys) -> None:
     builder = load_builder()
+    credential = "ENV_CREDENTIAL_MUST_NOT_LEAK"
     response_body_secret = "BODY_SECRET_MUST_NOT_LEAK"
     response_header_secret = "HEADER_SECRET_MUST_NOT_LEAK"
     request_secret = "REQUEST_SECRET_MUST_NOT_LEAK"
+    attempts = 0
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", credential)
 
     def rejected_urlopen(request, timeout):
+        nonlocal attempts
+        attempts += 1
         raise urllib.error.HTTPError(
             f"https://example.invalid/chat?token={request_secret}",
-            400,
-            "Bad Request",
+            500,
+            credential,
             {"Authorization": response_header_secret},
             io.BytesIO(response_body_secret.encode("utf-8")),
         )
 
     monkeypatch.setattr(builder.urllib.request, "urlopen", rejected_urlopen)
-    with pytest.raises(RuntimeError, match="HTTP 400 Bad Request") as raised:
+    monkeypatch.setattr(builder.time, "sleep", lambda seconds: None)
+    with pytest.raises(RuntimeError, match="HTTP 500") as raised:
         builder.post_chat_completion(
-            "request-authorization-secret",
+            credential,
             "https://example.invalid/chat",
             {"model": "test"},
             timeout=1,
-            max_retries=4,
+            max_retries=1,
         )
     rendered = f"{raised.value}\n{capsys.readouterr().err}"
+    assert attempts == 2
+    assert credential not in rendered
     assert response_body_secret not in rendered
     assert response_header_secret not in rendered
     assert request_secret not in rendered
-    assert "request-authorization-secret" not in rendered
+
+
+@pytest.mark.parametrize(
+    ("failure_kind", "category"), [("url", "network error"), ("tls", "TLS error")]
+)
+def test_remote_network_reasons_do_not_echo_environment_credential(
+    monkeypatch, capsys, failure_kind: str, category: str
+) -> None:
+    builder = load_builder()
+    credential = "ENV_CREDENTIAL_MUST_NOT_LEAK"
+    monkeypatch.setenv("DEEPSEEK_API_KEY", credential)
+
+    def rejected_urlopen(request, timeout):
+        if failure_kind == "url":
+            raise urllib.error.URLError(credential)
+        raise ssl.SSLError(credential)
+
+    monkeypatch.setattr(builder.urllib.request, "urlopen", rejected_urlopen)
+    monkeypatch.setattr(builder.time, "sleep", lambda seconds: None)
+    with pytest.raises(RuntimeError, match=category) as raised:
+        builder.post_chat_completion(
+            credential,
+            "https://example.invalid/chat",
+            {"model": "test"},
+            timeout=1,
+            max_retries=1,
+        )
+    captured = capsys.readouterr()
+    rendered = f"{raised.value}\n{captured.out}\n{captured.err}"
+    assert credential not in rendered
 
 
 def test_deepseek_writes_partial_after_each_batch(tmp_path: Path, monkeypatch) -> None:
@@ -441,6 +480,47 @@ def test_atomic_replacement_failure_preserves_previous_checkpoint(
         builder.atomic_write_json(output, {"metadata": {"partial": False}})
     assert json.loads(output.read_text(encoding="utf-8")) == previous
     assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
+
+
+def test_atomic_write_fsyncs_parent_directory_after_replace(tmp_path: Path, monkeypatch) -> None:
+    builder = load_builder()
+    output = tmp_path / "checkpoint.json"
+    events = []
+    directory_fd = None
+    real_open = builder.os.open
+    real_fsync = builder.os.fsync
+    real_close = builder.os.close
+    real_replace = builder.os.replace
+
+    def tracking_replace(source, destination):
+        events.append("replace")
+        return real_replace(source, destination)
+
+    def tracking_open(path, flags, *args):
+        nonlocal directory_fd
+        descriptor = real_open(path, flags, *args)
+        if Path(path) == output.parent:
+            directory_fd = descriptor
+            events.append("open-directory")
+        return descriptor
+
+    def tracking_fsync(descriptor):
+        if descriptor == directory_fd:
+            events.append("fsync-directory")
+        return real_fsync(descriptor)
+
+    def tracking_close(descriptor):
+        if descriptor == directory_fd:
+            events.append("close-directory")
+        return real_close(descriptor)
+
+    monkeypatch.setattr(builder.os, "replace", tracking_replace)
+    monkeypatch.setattr(builder.os, "open", tracking_open)
+    monkeypatch.setattr(builder.os, "fsync", tracking_fsync)
+    monkeypatch.setattr(builder.os, "close", tracking_close)
+    builder.atomic_write_json(output, {"metadata": {"partial": True}})
+    assert events == ["replace", "open-directory", "fsync-directory", "close-directory"]
+    assert json.loads(output.read_text(encoding="utf-8")) == {"metadata": {"partial": True}}
 
 
 def test_final_prior_drops_contextual_and_invalid_annotations() -> None:

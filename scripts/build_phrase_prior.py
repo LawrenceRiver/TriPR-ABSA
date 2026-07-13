@@ -299,11 +299,6 @@ def parse_json_content(content: str) -> Any:
         raise
 
 
-def _bounded_reason(reason: Any) -> str:
-    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(reason)).strip()
-    return (text or "unknown reason")[:120]
-
-
 def post_chat_completion(
     api_key: str,
     api_base: str,
@@ -319,7 +314,7 @@ def post_chat_completion(
         method="POST",
     )
     total_attempts = max_retries + 1
-    last_reason = "unknown failure"
+    last_category = "unknown failure"
     for attempt in range(max_retries + 1):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -328,34 +323,35 @@ def post_chat_completion(
                 raise ValueError("DeepSeek response must be a JSON object")
             return result
         except urllib.error.HTTPError as exc:
-            last_reason = f"HTTP {exc.code} {_bounded_reason(exc.reason)}"
-            if 400 <= exc.code < 500 and exc.code not in {408, 409, 429}:
+            status = exc.code if type(exc.code) is int else None
+            last_category = f"HTTP {status}" if status is not None else "HTTP error"
+            if status is not None and 400 <= status < 500 and status not in {408, 409, 429}:
                 raise RuntimeError(
                     f"DeepSeek request failed on attempt {attempt + 1}/{total_attempts}: "
-                    f"{last_reason}"
+                    f"{last_category}"
                 ) from None
-        except urllib.error.URLError as exc:
-            last_reason = f"network error: {_bounded_reason(exc.reason)}"
+        except urllib.error.URLError:
+            last_category = "network error"
         except TimeoutError:
-            last_reason = "timeout"
-        except ssl.SSLError as exc:
-            last_reason = f"TLS error: {_bounded_reason(exc)}"
+            last_category = "timeout"
+        except ssl.SSLError:
+            last_category = "TLS error"
         except json.JSONDecodeError:
-            last_reason = "invalid JSON response"
-        except ValueError as exc:
-            last_reason = _bounded_reason(exc)
+            last_category = "invalid JSON response"
+        except ValueError:
+            last_category = "invalid response"
         if attempt >= max_retries:
             break
         delay = min(2**attempt, 12) + 0.25
         print(
             f"[retry] DeepSeek request failed on attempt {attempt + 1}/"
-            f"{total_attempts}: {last_reason}; sleep {delay:.2f}s",
+            f"{total_attempts}: {last_category}; sleep {delay:.2f}s",
             file=sys.stderr,
             flush=True,
         )
         time.sleep(delay)
     raise RuntimeError(
-        f"DeepSeek request failed after {total_attempts} attempts: {last_reason}"
+        f"DeepSeek request failed after {total_attempts} attempts: {last_category}"
     ) from None
 
 
@@ -499,6 +495,12 @@ def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
             os.fsync(handle.fileno())
         os.replace(temporary, output)
         temporary = None
+        directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+        directory_descriptor = os.open(output.parent, directory_flags)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
     finally:
         if temporary is not None:
             try:

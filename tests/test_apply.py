@@ -9,7 +9,6 @@ from pragmatic_residual.apply import (
     apply_pragmatic_residual,
 )
 
-
 VALID_SAMPLE = {
     "text_list": ["The", "food", "was", "good", "."],
     "aspect": "food",

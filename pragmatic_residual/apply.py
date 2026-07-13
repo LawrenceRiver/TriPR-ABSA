@@ -7,7 +7,8 @@ Class order must be 0=positive, 1=negative, 2=neutral.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Any
 
 import torch
 
@@ -31,7 +32,7 @@ def _validate_sample(sample: Mapping[str, Any]) -> None:
         raise ValueError("sample aspect_post must be a two-item [start, end] span")
 
 
-def _as_tuple(modules: Optional[Iterable[str]]) -> Tuple[str, ...]:
+def _as_tuple(modules: Iterable[str] | None) -> tuple[str, ...]:
     selected = tuple(VALID_MODULES if modules is None else modules)
     unknown = sorted(set(selected) - set(VALID_MODULES))
     if unknown:
@@ -41,18 +42,18 @@ def _as_tuple(modules: Optional[Iterable[str]]) -> Tuple[str, ...]:
 
 def apply_pragmatic_residual(
     logits: torch.Tensor,
-    sample: Dict[str, Any],
-    modules: Optional[Iterable[str]] = None,
-    prior: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    intensity_params: Optional[Mapping[str, float]] = None,
+    sample: dict[str, Any],
+    modules: Iterable[str] | None = None,
+    prior: Mapping[str, Mapping[str, Any]] | None = None,
+    intensity_params: Mapping[str, float] | None = None,
     return_details: bool = False,
-) -> Union[torch.Tensor, Tuple[torch.Tensor, Dict[str, Any]]]:
+) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
     """Apply selected residual modules to one sample's logits."""
     _validate_logits(logits)
     _validate_sample(sample)
     selected = _as_tuple(modules)
     final_logits = logits.clone()
-    details: Dict[str, Any] = {
+    details: dict[str, Any] = {
         "modules": list(selected),
         "actions": [],
         "residual": torch.zeros_like(logits),
@@ -95,12 +96,12 @@ def apply_pragmatic_residual(
 
 def apply_batch(
     logits: torch.Tensor,
-    samples: Sequence[Dict[str, Any]],
-    modules: Optional[Iterable[str]] = None,
-    prior: Optional[Mapping[str, Mapping[str, Any]]] = None,
-    intensity_params: Optional[Mapping[str, float]] = None,
+    samples: Sequence[dict[str, Any]],
+    modules: Iterable[str] | None = None,
+    prior: Mapping[str, Mapping[str, Any]] | None = None,
+    intensity_params: Mapping[str, float] | None = None,
     return_details: bool = False,
-) -> Union[torch.Tensor, Tuple[torch.Tensor, List[Dict[str, Any]]]]:
+) -> torch.Tensor | tuple[torch.Tensor, list[dict[str, Any]]]:
     """Apply pragmatic residuals to a batch of logits and parsed samples."""
     _validate_logits(logits)
     if logits.ndim != 2 or logits.shape[-1] != 3:

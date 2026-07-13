@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "textgt-pragmatic-residual"
+version = "0.1.0"
+description = "A pragmatic residual layer for three-class aspect-based sentiment analysis"
+requires-python = ">=3.9,<3.11"
+dependencies = [
+  "numpy==1.24.3",
+  "torch==1.12.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["pragmatic_residual*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"

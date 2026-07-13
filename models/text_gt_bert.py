@@ -3,11 +3,11 @@
 import torch 
 import torch.nn as nn 
 import torch.nn.functional as F 
-from layers import TextGATConv
-from layers import TextGATConv_mod 
-from layers import TextGCNConv 
-from layers import TextGINConv
-from layers import TransformerLayer 
+from models.layers import TextGATConv
+from models.layers import TextGATConv_mod
+from models.layers import TextGCNConv
+from models.layers import TextGINConv
+from models.layers import TransformerLayer
 
 
 class TextGT_BERT(nn.Module): 

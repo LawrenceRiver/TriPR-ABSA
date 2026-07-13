@@ -1,4 +1,5 @@
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -7,7 +8,13 @@ import urllib.error
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+DEEPSEEK_CANDIDATES = [
+    {"phrase": "excellent", "count": 1},
+    {"phrase": "awful", "count": 1},
+]
 
 
 def load_builder() -> ModuleType:
@@ -31,9 +38,26 @@ def test_builder_help_has_offline_default() -> None:
     assert "offline" in completed.stdout
 
 
-def test_fixture_contains_no_secret_field() -> None:
+def test_fixture_contains_no_secret_key_or_value_recursively() -> None:
     data = json.loads((ROOT / "tests" / "fixtures" / "prior.json").read_text())
-    assert not any("key" in name.lower() for name in data)
+
+    def assert_secret_free(value) -> None:
+        if isinstance(value, dict):
+            for name, child in value.items():
+                assert "key" not in name.lower()
+                assert_secret_free(child)
+        elif isinstance(value, list):
+            for child in value:
+                assert_secret_free(child)
+        elif isinstance(value, str):
+            lowered = value.lower()
+            assert not any(
+                marker in lowered
+                for marker in ("api_key", "api-key", "bearer ", "password", "secret", "token")
+            )
+            assert not lowered.startswith("sk-")
+
+    assert_secret_free(data)
 
 
 def test_offline_builder_uses_train_split_only(tmp_path: Path) -> None:
@@ -169,13 +193,41 @@ def test_http_retry_count_is_bounded(monkeypatch) -> None:
     assert attempts == 3
 
 
+def test_http_errors_do_not_echo_response_or_request_secrets(monkeypatch, capsys) -> None:
+    builder = load_builder()
+    response_body_secret = "BODY_SECRET_MUST_NOT_LEAK"
+    response_header_secret = "HEADER_SECRET_MUST_NOT_LEAK"
+    request_secret = "REQUEST_SECRET_MUST_NOT_LEAK"
+
+    def rejected_urlopen(request, timeout):
+        raise urllib.error.HTTPError(
+            f"https://example.invalid/chat?token={request_secret}",
+            400,
+            "Bad Request",
+            {"Authorization": response_header_secret},
+            io.BytesIO(response_body_secret.encode("utf-8")),
+        )
+
+    monkeypatch.setattr(builder.urllib.request, "urlopen", rejected_urlopen)
+    with pytest.raises(RuntimeError, match="HTTP 400 Bad Request") as raised:
+        builder.post_chat_completion(
+            "request-authorization-secret",
+            "https://example.invalid/chat",
+            {"model": "test"},
+            timeout=1,
+            max_retries=4,
+        )
+    rendered = f"{raised.value}\n{capsys.readouterr().err}"
+    assert response_body_secret not in rendered
+    assert response_header_secret not in rendered
+    assert request_secret not in rendered
+    assert "request-authorization-secret" not in rendered
+
+
 def test_deepseek_writes_partial_after_each_batch(tmp_path: Path, monkeypatch) -> None:
     builder = load_builder()
     output = tmp_path / "partial.json"
-    candidates = [
-        {"phrase": "excellent", "count": 1},
-        {"phrase": "awful", "count": 1},
-    ]
+    candidates = DEEPSEEK_CANDIDATES
     observed_partial = []
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "secret")
@@ -213,85 +265,239 @@ def test_deepseek_writes_partial_after_each_batch(tmp_path: Path, monkeypatch) -
         == 0
     )
     assert observed_partial[0]["metadata"]["partial"] is True
-    assert "excellent" in {item["phrase"] for item in observed_partial[0]["prior"]}
+    assert {item["phrase"] for item in observed_partial[0]["prior"]} == {"excellent"}
+    assert observed_partial[0]["completed_phrases"] == ["excellent"]
+    assert "awful" not in observed_partial[0]["completed_phrases"]
     assert json.loads(output.read_text())["metadata"]["partial"] is False
 
 
-def test_resume_skips_phrases_in_partial_payload(tmp_path: Path, monkeypatch) -> None:
+def deepseek_args(builder: ModuleType, output: Path, *extra: str):
+    return builder.create_parser().parse_args(
+        [
+            "--provider",
+            "deepseek",
+            "--train-file",
+            str(ROOT / "tests" / "fixtures" / "train.json"),
+            "--output",
+            str(output),
+            *extra,
+        ]
+    )
+
+
+def checkpoint_payload(
+    builder: ModuleType,
+    args,
+    candidates,
+    *,
+    prior=None,
+    completed_phrases=None,
+    completed_batches: int = 0,
+):
+    return {
+        "metadata": {
+            "split": "train",
+            "provider": "deepseek",
+            "model": args.model,
+            "candidate_mode": args.candidate_mode,
+            "uses_test_text_or_label": False,
+            "partial": True,
+            "api_base": args.api_base,
+            "api_key_env": args.api_key_env,
+            "completed_batches": completed_batches,
+            "candidate_digest": builder.checkpoint_digest(candidates, args),
+        },
+        "candidates": candidates,
+        "completed_phrases": completed_phrases or [],
+        "prior": prior or [],
+    }
+
+
+def accepted_entry(phrase: str, polarity: int) -> dict:
+    return {
+        "phrase": phrase,
+        "is_quality_or_intensity_prior": True,
+        "polarity": polarity,
+        "intensity": 0.9,
+        "dimension": "quality",
+        "source": "deepseek",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid", "message"),
+    [
+        ("partial", False, "partial must be true"),
+        ("provider", "offline", "provider must be deepseek"),
+        ("model", "stale-model", "model does not match current run"),
+        ("api_base", "https://stale.invalid", "api-base does not match current run"),
+        ("candidate_mode", "cue", "candidate-mode does not match current run"),
+        ("candidate_digest", "0" * 64, "candidate digest does not match current run"),
+    ],
+)
+def test_resume_rejects_stale_or_mismatched_checkpoint(
+    tmp_path: Path, monkeypatch, field: str, invalid, message: str
+) -> None:
+    builder = load_builder()
+    output = tmp_path / "stale-checkpoint.json"
+    args = deepseek_args(builder, output, "--resume")
+    payload = checkpoint_payload(builder, args, DEEPSEEK_CANDIDATES)
+    payload["metadata"][field] = invalid
+    output.write_text(json.dumps(payload), encoding="utf-8")
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret")
+    monkeypatch.setattr(builder, "extract_candidates", lambda *args, **kwargs: DEEPSEEK_CANDIDATES)
+    with pytest.raises(ValueError, match=rf"stale-checkpoint.json.*{message}"):
+        builder.build_prior(args)
+
+
+def test_resume_filters_restored_entries_to_current_candidates(tmp_path: Path, monkeypatch) -> None:
     builder = load_builder()
     output = tmp_path / "resume.json"
-    output.write_text(
-        json.dumps(
-            {
-                "metadata": {"split": "train", "provider": "deepseek", "partial": True},
-                "prior": [
-                    {
-                        "phrase": "excellent",
-                        "polarity": 1,
-                        "intensity": 0.9,
-                        "dimension": "quality",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
+    args = deepseek_args(builder, output, "--resume")
+    payload = checkpoint_payload(
+        builder,
+        args,
+        DEEPSEEK_CANDIDATES,
+        prior=[accepted_entry("excellent", 1), accepted_entry("ghost", -1)],
+        completed_phrases=["excellent", "ghost"],
+        completed_batches=2,
     )
-    candidates = [
-        {"phrase": "excellent", "count": 1},
-        {"phrase": "awful", "count": 1},
-    ]
+    output.write_text(json.dumps(payload), encoding="utf-8")
     requested = []
 
     monkeypatch.setenv("DEEPSEEK_API_KEY", "secret")
-    monkeypatch.setattr(builder, "extract_candidates", lambda *args, **kwargs: candidates)
+    monkeypatch.setattr(builder, "extract_candidates", lambda *args, **kwargs: DEEPSEEK_CANDIDATES)
 
     def fake_call(api_key, api_base, model, batch, timeout, max_retries):
         requested.extend(item["phrase"] for item in batch)
-        return [
-            {
-                "phrase": "awful",
-                "is_quality_or_intensity_prior": True,
-                "polarity": -1,
-                "intensity": 0.9,
-                "dimension": "quality",
-            }
-        ]
+        return [accepted_entry("awful", -1)]
 
     monkeypatch.setattr(builder, "call_deepseek", fake_call)
-    assert (
-        builder.main(
-            [
-                "--provider",
-                "deepseek",
-                "--train-file",
-                str(ROOT / "tests" / "fixtures" / "train.json"),
-                "--output",
-                str(output),
-                "--resume",
-            ]
-        )
-        == 0
-    )
+    builder.build_prior(args)
     assert requested == ["awful"]
-    assert {item["phrase"] for item in json.loads(output.read_text())["prior"]} == {
+    final = json.loads(output.read_text())
+    assert {item["phrase"] for item in final["prior"]} == {
         "awful",
         "excellent",
     }
+    assert final["metadata"]["completed_batches"] == 3
+
+
+def test_resume_skips_rejected_but_completed_phrases(tmp_path: Path, monkeypatch) -> None:
+    builder = load_builder()
+    output = tmp_path / "rejected-completed.json"
+    args = deepseek_args(builder, output, "--resume")
+    payload = checkpoint_payload(
+        builder,
+        args,
+        DEEPSEEK_CANDIDATES,
+        prior=[],
+        completed_phrases=["excellent"],
+        completed_batches=4,
+    )
+    output.write_text(json.dumps(payload), encoding="utf-8")
+    requested = []
+
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "secret")
+    monkeypatch.setattr(builder, "extract_candidates", lambda *args, **kwargs: DEEPSEEK_CANDIDATES)
+
+    def fake_call(api_key, api_base, model, batch, timeout, max_retries):
+        requested.extend(item["phrase"] for item in batch)
+        return [accepted_entry("awful", -1)]
+
+    monkeypatch.setattr(builder, "call_deepseek", fake_call)
+    builder.build_prior(args)
+    assert requested == ["awful"]
+    final = json.loads(output.read_text())
+    assert final["completed_phrases"] == ["excellent", "awful"]
+    assert final["metadata"]["completed_batches"] == 5
+
+
+def test_checkpoint_digest_is_order_independent_and_config_bound(tmp_path: Path) -> None:
+    builder = load_builder()
+    args = deepseek_args(builder, tmp_path / "prior.json")
+    digest = builder.checkpoint_digest(DEEPSEEK_CANDIDATES, args)
+    assert digest == builder.checkpoint_digest(list(reversed(DEEPSEEK_CANDIDATES)), args)
+    args.model = "different-model"
+    assert digest != builder.checkpoint_digest(DEEPSEEK_CANDIDATES, args)
+
+
+def test_atomic_replacement_failure_preserves_previous_checkpoint(
+    tmp_path: Path, monkeypatch
+) -> None:
+    builder = load_builder()
+    output = tmp_path / "checkpoint.json"
+    previous = {"metadata": {"partial": True}, "completed_phrases": ["excellent"]}
+    output.write_text(json.dumps(previous), encoding="utf-8")
+
+    def fail_replace(source, destination):
+        assert Path(source).parent == output.parent
+        assert Path(destination) == output
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(builder.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="simulated replacement failure"):
+        builder.atomic_write_json(output, {"metadata": {"partial": False}})
+    assert json.loads(output.read_text(encoding="utf-8")) == previous
+    assert list(tmp_path.glob(f".{output.name}.*.tmp")) == []
 
 
 def test_final_prior_drops_contextual_and_invalid_annotations() -> None:
     builder = load_builder()
     cleaned = builder.clean_prior_entries(
         [
-            {"phrase": "excellent", "polarity": 1, "intensity": 0.9},
-            {"phrase": "context", "polarity": 0, "intensity": 0.5},
+            accepted_entry("excellent", 1),
+            {
+                "phrase": "context",
+                "is_quality_or_intensity_prior": True,
+                "polarity": 0,
+                "intensity": 0.5,
+            },
             {
                 "phrase": "ignore",
                 "polarity": -1,
                 "intensity": 0.5,
                 "is_quality_or_intensity_prior": False,
             },
-            {"phrase": "too-much", "polarity": 1, "intensity": 1.5},
+            {
+                "phrase": "too-much",
+                "is_quality_or_intensity_prior": True,
+                "polarity": 1,
+                "intensity": 1.5,
+            },
         ]
     )
     assert [item["phrase"] for item in cleaned] == ["excellent"]
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("is_quality_or_intensity_prior", 1),
+        ("is_quality_or_intensity_prior", "true"),
+        ("polarity", True),
+        ("polarity", 1.0),
+        ("polarity", "1"),
+        ("intensity", True),
+        ("intensity", "0.9"),
+        ("intensity", 10**1000),
+        ("intensity", float("nan")),
+        ("intensity", float("inf")),
+        ("phrase", 123),
+        ("phrase", ""),
+        ("phrase", "   "),
+    ],
+)
+def test_provider_annotations_require_exact_types(field: str, invalid) -> None:
+    builder = load_builder()
+    entry = accepted_entry("excellent", 1)
+    entry[field] = invalid
+    assert builder.clean_prior_entries([entry]) == []
+
+
+def test_provider_annotation_requires_explicit_true_prior_flag() -> None:
+    builder = load_builder()
+    entry = accepted_entry("excellent", 1)
+    del entry["is_quality_or_intensity_prior"]
+    assert builder.clean_prior_entries([entry]) == []

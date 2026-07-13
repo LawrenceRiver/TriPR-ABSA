@@ -11,12 +11,14 @@ complete rows. Credentials are read from an environment variable at runtime.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import re
 import ssl
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -223,28 +225,37 @@ def clean_prior_entries(entries: Sequence[Any]) -> list[dict[str, Any]]:
     """Return only entries accepted by the strict runtime prior loader."""
     cleaned: dict[str, dict[str, Any]] = {}
     for item in entries:
-        if not isinstance(item, dict) or not item.get("is_quality_or_intensity_prior", True):
+        if not isinstance(item, dict) or item.get("is_quality_or_intensity_prior") is not True:
             continue
-        phrase = canonical_phrase(item.get("phrase", ""))
+        raw_phrase = item.get("phrase")
+        if not isinstance(raw_phrase, str) or not raw_phrase.strip():
+            continue
+        phrase = canonical_phrase(raw_phrase)
         if not phrase:
             continue
-        try:
-            polarity = int(item.get("polarity", 0))
-            intensity = float(item.get("intensity", 0.0))
-        except (TypeError, ValueError):
+        polarity = item.get("polarity")
+        intensity = item.get("intensity")
+        if type(polarity) is not int or polarity not in (-1, 1):
             continue
-        if polarity not in (-1, 1) or not math.isfinite(intensity) or not 0.0 < intensity <= 1.0:
+        if (
+            type(intensity) not in (int, float)
+            or not 0.0 < intensity <= 1.0
+            or not math.isfinite(intensity)
+        ):
             continue
+        dimension = item.get("dimension", "other")
+        subjectivity = item.get("subjectivity", "weaksubj")
         entry = {
             "phrase": phrase,
+            "is_quality_or_intensity_prior": True,
             "polarity": polarity,
             "intensity": intensity,
-            "dimension": str(item.get("dimension", "other")),
-            "subjectivity": str(item.get("subjectivity", "weaksubj")),
+            "dimension": dimension if isinstance(dimension, str) else "other",
+            "subjectivity": subjectivity if isinstance(subjectivity, str) else "weaksubj",
         }
-        if "source" in item:
-            entry["source"] = str(item["source"])
-        if "count" in item and isinstance(item["count"], int):
+        if isinstance(item.get("source"), str):
+            entry["source"] = item["source"]
+        if type(item.get("count")) is int:
             entry["count"] = item["count"]
         cleaned[phrase] = entry
     return [cleaned[phrase] for phrase in sorted(cleaned)]
@@ -260,6 +271,7 @@ def offline_prior(candidates: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
         entries.append(
             {
                 "phrase": phrase,
+                "is_quality_or_intensity_prior": True,
                 "polarity": polarity,
                 "intensity": intensity,
                 "dimension": dimension,
@@ -287,6 +299,11 @@ def parse_json_content(content: str) -> Any:
         raise
 
 
+def _bounded_reason(reason: Any) -> str:
+    text = re.sub(r"[\x00-\x1f\x7f]+", " ", str(reason)).strip()
+    return (text or "unknown reason")[:120]
+
+
 def post_chat_completion(
     api_key: str,
     api_base: str,
@@ -301,7 +318,8 @@ def post_chat_completion(
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    last_error: BaseException | None = None
+    total_attempts = max_retries + 1
+    last_reason = "unknown failure"
     for attempt in range(max_retries + 1):
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
@@ -310,25 +328,35 @@ def post_chat_completion(
                 raise ValueError("DeepSeek response must be a JSON object")
             return result
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="ignore")
-            last_error = RuntimeError(f"DeepSeek request failed: HTTP {exc.code} {detail}")
+            last_reason = f"HTTP {exc.code} {_bounded_reason(exc.reason)}"
             if 400 <= exc.code < 500 and exc.code not in {408, 409, 429}:
-                raise last_error from exc
-        except (urllib.error.URLError, TimeoutError, ssl.SSLError, ValueError) as exc:
-            last_error = exc
+                raise RuntimeError(
+                    f"DeepSeek request failed on attempt {attempt + 1}/{total_attempts}: "
+                    f"{last_reason}"
+                ) from None
+        except urllib.error.URLError as exc:
+            last_reason = f"network error: {_bounded_reason(exc.reason)}"
+        except TimeoutError:
+            last_reason = "timeout"
+        except ssl.SSLError as exc:
+            last_reason = f"TLS error: {_bounded_reason(exc)}"
+        except json.JSONDecodeError:
+            last_reason = "invalid JSON response"
+        except ValueError as exc:
+            last_reason = _bounded_reason(exc)
         if attempt >= max_retries:
             break
         delay = min(2**attempt, 12) + 0.25
         print(
             f"[retry] DeepSeek request failed on attempt {attempt + 1}/"
-            f"{max_retries + 1}: {last_error}; sleep {delay:.2f}s",
+            f"{total_attempts}: {last_reason}; sleep {delay:.2f}s",
             file=sys.stderr,
             flush=True,
         )
         time.sleep(delay)
     raise RuntimeError(
-        f"DeepSeek request failed after {max_retries + 1} attempts: {last_error}"
-    ) from last_error
+        f"DeepSeek request failed after {total_attempts} attempts: {last_reason}"
+    ) from None
 
 
 def call_deepseek(
@@ -403,7 +431,36 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _metadata(args: argparse.Namespace, partial: bool) -> dict[str, Any]:
+def checkpoint_digest(candidates: Sequence[dict[str, Any]], args: argparse.Namespace) -> str:
+    """Bind checkpoint state to candidate identity and provider configuration."""
+    candidate_identity = sorted(
+        (item["phrase"], item["count"])
+        for item in candidates
+        if isinstance(item, dict)
+        and isinstance(item.get("phrase"), str)
+        and type(item.get("count")) is int
+    )
+    if len(candidate_identity) != len(candidates):
+        raise ValueError("candidates must contain exact phrase/count pairs")
+    identity = {
+        "candidates": candidate_identity,
+        "config": {
+            "provider": args.provider,
+            "model": args.model if args.provider == "deepseek" else None,
+            "api_base": args.api_base if args.provider == "deepseek" else None,
+            "candidate_mode": args.candidate_mode,
+        },
+    }
+    serialized = json.dumps(
+        identity,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
+def _metadata(args: argparse.Namespace, partial: bool, candidate_digest: str) -> dict[str, Any]:
     metadata = {
         "split": "train",
         "provider": args.provider,
@@ -416,9 +473,38 @@ def _metadata(args: argparse.Namespace, partial: bool) -> dict[str, Any]:
             "partial": partial,
             "api_base": args.api_base if args.provider == "deepseek" else None,
             "api_key_env": args.api_key_env if args.provider == "deepseek" else None,
+            "candidate_digest": candidate_digest,
         }
     )
     return metadata
+
+
+def atomic_write_json(output: Path, payload: dict[str, Any]) -> None:
+    """Durably replace ``output`` with JSON without exposing a partial file."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temporary = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, output)
+        temporary = None
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _write_payload(
@@ -428,34 +514,98 @@ def _write_payload(
     prior: Sequence[dict[str, Any]],
     partial: bool,
     completed_batches: int,
+    completed_phrases: Sequence[str],
+    candidate_digest: str,
 ) -> None:
-    metadata = _metadata(args, partial)
+    metadata = _metadata(args, partial, candidate_digest)
     metadata["completed_batches"] = completed_batches
     payload = {
         "metadata": metadata,
         "candidates": list(candidates),
+        "completed_phrases": list(completed_phrases),
         "prior": clean_prior_entries(prior),
     }
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(output, payload)
 
 
-def _resume_prior(output: Path, enabled: bool) -> list[dict[str, Any]]:
+def _resume_error(output: Path, message: str) -> ValueError:
+    return ValueError(f"{output}: resume payload {message}")
+
+
+def _resume_checkpoint(
+    output: Path,
+    enabled: bool,
+    args: argparse.Namespace,
+    candidates: Sequence[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], set[str], int]:
     if not enabled or not output.exists():
-        return []
+        return [], set(), 0
     try:
         payload = json.loads(output.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
-        raise ValueError(f"{output}: resume payload must contain valid JSON") from exc
+        raise _resume_error(output, "must contain valid JSON") from exc
     if not isinstance(payload, dict):
-        raise ValueError(f"{output}: resume payload must be an object")
+        raise _resume_error(output, "must be an object")
     metadata = payload.get("metadata")
-    if not isinstance(metadata, dict) or metadata.get("split") != "train":
-        raise ValueError(f"{output}: resume payload split must be train")
-    prior = payload.get("prior")
-    if not isinstance(prior, list):
-        raise ValueError(f"{output}: resume payload prior must be a list")
-    return clean_prior_entries(prior)
+    if not isinstance(metadata, dict):
+        raise _resume_error(output, "metadata must be an object")
+    if metadata.get("split") != "train":
+        raise _resume_error(output, "split must be train")
+    if metadata.get("partial") is not True:
+        raise _resume_error(output, "partial must be true")
+    if metadata.get("provider") != "deepseek":
+        raise _resume_error(output, "provider must be deepseek")
+    for field, label in (
+        ("model", "model"),
+        ("api_base", "api-base"),
+        ("candidate_mode", "candidate-mode"),
+    ):
+        if metadata.get(field) != getattr(args, field):
+            raise _resume_error(output, f"{label} does not match current run")
+
+    current_digest = checkpoint_digest(candidates, args)
+    stored_digest = metadata.get("candidate_digest")
+    checkpoint_candidates = payload.get("candidates")
+    try:
+        checkpoint_candidate_digest = checkpoint_digest(checkpoint_candidates, args)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise _resume_error(output, "candidates are invalid") from exc
+    if stored_digest != current_digest or checkpoint_candidate_digest != current_digest:
+        raise _resume_error(output, "candidate digest does not match current run")
+
+    completed_batches = metadata.get("completed_batches")
+    if type(completed_batches) is not int or completed_batches < 0:
+        raise _resume_error(output, "completed_batches must be a non-negative integer")
+    raw_completed = payload.get("completed_phrases")
+    if not isinstance(raw_completed, list) or not all(
+        isinstance(phrase, str) and phrase and phrase == canonical_phrase(phrase)
+        for phrase in raw_completed
+    ):
+        raise _resume_error(output, "completed_phrases must be a canonical string list")
+    if len(set(raw_completed)) != len(raw_completed):
+        raise _resume_error(output, "completed_phrases must not contain duplicates")
+    raw_prior = payload.get("prior")
+    if not isinstance(raw_prior, list):
+        raise _resume_error(output, "prior must be a list")
+
+    allowed_phrases = {candidate["phrase"] for candidate in candidates}
+    completed_phrases = set(raw_completed) & allowed_phrases
+    restored_prior = [
+        entry
+        for entry in clean_prior_entries(raw_prior)
+        if entry["phrase"] in allowed_phrases
+        and entry["phrase"] in completed_phrases
+        and entry.get("source") == "deepseek"
+    ]
+    return restored_prior, completed_phrases, completed_batches
+
+
+def _ordered_completed(
+    candidates: Sequence[dict[str, Any]], completed_phrases: set[str]
+) -> list[str]:
+    return [
+        candidate["phrase"] for candidate in candidates if candidate["phrase"] in completed_phrases
+    ]
 
 
 def build_prior(args: argparse.Namespace) -> list[dict[str, Any]]:
@@ -474,18 +624,31 @@ def build_prior(args: argparse.Namespace) -> list[dict[str, Any]]:
 
     samples = load_train_samples(args.train_file)
     candidates = extract_candidates(samples, candidate_mode=args.candidate_mode)
+    candidate_digest = checkpoint_digest(candidates, args)
     base_prior = offline_prior(candidates)
     if args.provider == "offline":
-        _write_payload(args.output, args, candidates, base_prior, False, 0)
+        _write_payload(
+            args.output,
+            args,
+            candidates,
+            base_prior,
+            False,
+            0,
+            [],
+            candidate_digest,
+        )
         return base_prior
 
-    prior_by_phrase = {entry["phrase"]: entry for entry in base_prior}
-    previous = _resume_prior(args.output, args.resume)
-    prior_by_phrase.update({entry["phrase"]: entry for entry in previous})
-    seen = {entry["phrase"] for entry in previous}
-    remaining = [candidate for candidate in candidates if candidate["phrase"] not in seen]
-    allowed_phrases = {candidate["phrase"] for candidate in candidates}
-    completed_batches = 0
+    previous, completed_phrases, completed_batches = _resume_checkpoint(
+        args.output,
+        args.resume,
+        args,
+        candidates,
+    )
+    remote_prior_by_phrase = {entry["phrase"]: entry for entry in previous}
+    remaining = [
+        candidate for candidate in candidates if candidate["phrase"] not in completed_phrases
+    ]
     for start in range(0, len(remaining), args.batch_size):
         batch = remaining[start : start + args.batch_size]
         annotations = call_deepseek(
@@ -496,22 +659,37 @@ def build_prior(args: argparse.Namespace) -> list[dict[str, Any]]:
             args.timeout,
             args.max_retries,
         )
+        batch_phrases = {candidate["phrase"] for candidate in batch}
         for entry in clean_prior_entries(annotations):
-            if entry["phrase"] in allowed_phrases:
+            if entry["phrase"] in batch_phrases:
                 entry["source"] = "deepseek"
-                prior_by_phrase[entry["phrase"]] = entry
+                remote_prior_by_phrase[entry["phrase"]] = entry
+        completed_phrases.update(batch_phrases)
         completed_batches += 1
         _write_payload(
             args.output,
             args,
             candidates,
-            list(prior_by_phrase.values()),
+            list(remote_prior_by_phrase.values()),
             True,
             completed_batches,
+            _ordered_completed(candidates, completed_phrases),
+            candidate_digest,
         )
 
-    final_prior = clean_prior_entries(list(prior_by_phrase.values()))
-    _write_payload(args.output, args, candidates, final_prior, False, completed_batches)
+    final_prior_by_phrase = {entry["phrase"]: entry for entry in base_prior}
+    final_prior_by_phrase.update(remote_prior_by_phrase)
+    final_prior = clean_prior_entries(list(final_prior_by_phrase.values()))
+    _write_payload(
+        args.output,
+        args,
+        candidates,
+        final_prior,
+        False,
+        completed_batches,
+        _ordered_completed(candidates, completed_phrases),
+        candidate_digest,
+    )
     return final_prior
 
 

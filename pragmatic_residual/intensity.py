@@ -175,10 +175,11 @@ def intensity_score(
     resolved_params = {**DEFAULT_INTENSITY_PARAMS, **(params or {})}
     raw_tokens = [str(token).lower() for token in sample["text_list"]]
     tokens = [norm(token) for token in raw_tokens]
-    aspect_terms = {norm(part) for part in str(sample.get("aspect", "")).split()}
     start, end = sample["aspect_post"]
     start = max(0, min(start, len(tokens)))
     end = max(start, min(end, len(tokens)))
+    aspect_terms = {token for token in tokens[start:end] if token}
+    aspect_terms.update(norm(part) for part in str(sample.get("aspect", "")).split() if norm(part))
     left, right = clause_bounds(raw_tokens, start, end)
     clause = tokens[left:right]
 

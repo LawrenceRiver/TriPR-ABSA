@@ -49,6 +49,19 @@ def test_empty_module_set_is_identity() -> None:
     assert torch.equal(adjusted, logits)
 
 
+@pytest.mark.parametrize("modules", [(), ("fact",), ("comparison",), ("intensity",)])
+def test_single_sample_rejects_non_rank_one_logits(modules: tuple[str, ...]) -> None:
+    with pytest.raises(ValueError, match=r"single-sample logits must have shape \[3\]"):
+        apply_pragmatic_residual(torch.zeros((2, 3)), VALID_SAMPLE, modules=modules)
+
+
+@pytest.mark.parametrize("modules", [(), ("fact",), ("comparison",), ("intensity",)])
+def test_single_sample_accepts_three_class_vector(modules: tuple[str, ...]) -> None:
+    adjusted = apply_pragmatic_residual(torch.zeros(3), VALID_SAMPLE, modules=modules)
+
+    assert adjusted.shape == (3,)
+
+
 def test_batch_reuses_one_shot_module_iterable(monkeypatch: pytest.MonkeyPatch) -> None:
     fact_module = ModuleType("pragmatic_residual.fact")
     calls = []

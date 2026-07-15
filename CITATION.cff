@@ -1,0 +1,22 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this repository and the upstream TextGT paper."
+title: "TextGT Pragmatic Residual Adapter"
+type: software
+version: 0.1.0
+date-released: "2026-07-13"
+license: MIT
+repository-code: "https://github.com/LawrenceRiver/TextGT"
+authors:
+  - name: "Lawrence River"
+  - name: "QCYTSN"
+  - name: "jason0917-eng"
+references:
+  - type: conference-paper
+    title: "TextGT: A Double-View Graph Transformer on Text for Aspect-Based Sentiment Analysis"
+    year: 2024
+    doi: "10.1609/aaai.v38i17.29911"
+    authors:
+      - family-names: "Yin"
+        given-names: "Shuo"
+      - family-names: "Zhong"
+        given-names: "Guoqiang"

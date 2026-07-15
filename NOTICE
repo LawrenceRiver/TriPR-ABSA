@@ -1,0 +1,24 @@
+TextGT Pragmatic Residual Adapter
+
+This repository is an independent research fork of TextGT:
+https://github.com/shuoyinn/TextGT
+
+The upstream TextGT implementation is Copyright (c) 2024 Shuo Yin and is
+distributed under the MIT License included in this repository.
+
+The 2026 modifications add a model-agnostic pragmatic residual layer,
+train-split phrase priors, evaluation scripts, visualizations, and documentation.
+They are not endorsed by or affiliated with the upstream TextGT authors.
+
+The MIT license covers the upstream software and this repository's software
+modifications. Third-party datasets, pretrained models, and GloVe resources are
+not relicensed by this repository; users must follow their original terms.
+
+Unless separately stated, original architecture and result figures are not
+covered by the MIT software license. They remain copyrighted by their
+respective contributors.
+
+Upstream paper:
+Shuo Yin and Guoqiang Zhong. "TextGT: A Double-View Graph Transformer on Text
+for Aspect-Based Sentiment Analysis." AAAI 2024.
+https://doi.org/10.1609/aaai.v38i17.29911

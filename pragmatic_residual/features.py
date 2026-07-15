@@ -60,6 +60,7 @@ _CLAUSE_MARKERS = {
     "yet",
     "except",
 }
+_RELATION_BOUNDARIES = _CLAUSE_MARKERS | {"and", "or"}
 _NEGATORS = {
     "not",
     "no",
@@ -69,15 +70,104 @@ _NEGATORS = {
     "neither",
     "nor",
     "cant",
+    "cannot",
     "couldnt",
     "dont",
     "didnt",
     "doesnt",
+    "arent",
+    "hadnt",
+    "hasnt",
+    "havent",
+    "isnt",
+    "mustnt",
+    "shouldnt",
+    "wasnt",
+    "werent",
+    "wont",
+    "wouldnt",
 }
+_DIRECTIONAL_EXTERNAL_PHRASES = (
+    "at home",
+    "at a mall",
+    "mall food court",
+    "anywhere else",
+    "other restaurants",
+    "other japanese restaurants",
+    "other places",
+    "local grocery store",
+    "big mac",
+    "food court",
+    "chinatown",
+    "by nyc standards",
+    "elsewhere",
+    "mcdonalds",
+    "mcdonald",
+)
+_COMPARISON_RELATION_CUES = {
+    "ate",
+    "eaten",
+    "experienced",
+    "find",
+    "found",
+    "had",
+    "make",
+    "made",
+    "ordered",
+    "tried",
+}
+_COMPARISON_CUE_WINDOW = 4
+_DIRECT_COMPARISON_EXPERIENCERS = {"i", "we", "you"}
+_IMPLICIT_SUBJECT_WINDOW = 4
+_IMPLICIT_SUBJECT_BRIDGE = {
+    "actually",
+    "already",
+    "also",
+    "am",
+    "are",
+    "can",
+    "could",
+    "did",
+    "do",
+    "does",
+    "ever",
+    "has",
+    "have",
+    "just",
+    "may",
+    "might",
+    "must",
+    "often",
+    "once",
+    "really",
+    "recently",
+    "shall",
+    "should",
+    "sometimes",
+    "still",
+    "usually",
+    "was",
+    "were",
+    "will",
+    "would",
+}
+_POSITIVE_COMPARATIVES = {"better", "best"}
+_NEGATIVE_COMPARATIVES = {"worse", "worst"}
+_PRICE_POSITIVE_COMPARATIVES = {"cheaper", "lower"}
+_PRICE_NEGATIVE_COMPARATIVES = {"higher"}
+_VALUE_POSITIVE_COMPARATIVES = {"higher"}
+_VALUE_NEGATIVE_COMPARATIVES = {"lower"}
+_EXPLICIT_TARGET_WINDOW = 4
+_MONETARY_AMOUNT_ASPECT_TERMS = {"price", "prices", "priced", "bill", "cost", "bucks"}
+_VALUE_ASPECT_TERMS = {"value", "values"}
+_PRICE_CONTEXT_TERMS = _MONETARY_AMOUNT_ASPECT_TERMS | _VALUE_ASPECT_TERMS | {"deal"}
 
 
 def _norm_token(token: object) -> str:
-    return re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", str(token).lower())
+    raw = str(token).strip().lower().translate(str.maketrans({"’": "'", "‘": "'"}))
+    if raw.endswith("n't"):
+        raw = f"{raw[:-3]}nt"
+    return re.sub(r"^[^a-z0-9]+|[^a-z0-9]+$", "", raw)
 
 
 def _contains_phrase(tokens: Sequence[str], phrase: str) -> bool:
@@ -122,13 +212,6 @@ def _phrase_positions(tokens: Sequence[str], phrase: str) -> list[int]:
     ]
 
 
-def _first_phrase_position(tokens: Sequence[str], phrases: Iterable[str]) -> int:
-    positions = []
-    for phrase in phrases:
-        positions.extend(_phrase_positions(tokens, phrase))
-    return min(positions) if positions else -1
-
-
 def _clause_bounds(tokens: Sequence[str], start: int, end: int) -> tuple[int, int]:
     left = 0
     right = len(tokens)
@@ -138,6 +221,20 @@ def _clause_bounds(tokens: Sequence[str], start: int, end: int) -> tuple[int, in
             break
     for idx in range(end, len(tokens)):
         if tokens[idx] in _CLAUSE_MARKERS:
+            right = idx
+            break
+    return left, right
+
+
+def _relation_bounds(tokens: Sequence[str], start: int, end: int) -> tuple[int, int]:
+    left = 0
+    right = len(tokens)
+    for idx in range(start - 1, -1, -1):
+        if tokens[idx] in _RELATION_BOUNDARIES:
+            left = idx + 1
+            break
+    for idx in range(end, len(tokens)):
+        if tokens[idx] in _RELATION_BOUNDARIES:
             right = idx
             break
     return left, right
@@ -163,33 +260,107 @@ def _clause_token(token: object) -> str:
     return _norm_token(token)
 
 
-def _direct_better_elsewhere(text_list: Sequence[object], aspect_post: Sequence[int]) -> bool:
-    """Recognize unnegated comparative -> aspect -> elsewhere within one clause."""
+def _direct_negative_external_comparison(
+    text_list: Sequence[object], aspect_post: Sequence[int]
+) -> bool:
+    """Recognize unnegated superiority -> aspect -> external reference in one clause."""
     tokens = [_clause_token(token) for token in text_list]
     raw_start, raw_end = aspect_post
     start = min(max(raw_start, 0), len(tokens))
     end = min(max(raw_end, start), len(tokens))
-    clause_left, clause_right = _clause_bounds(tokens, start, end)
+    clause_left, clause_right = _relation_bounds(tokens, start, end)
+    clause = tokens[clause_left:clause_right]
+    if "than" in clause or _count_any(clause, _NEGATORS) > 0:
+        return False
 
-    comparative_positions = [
+    comparative_pos = start - 1
+    if comparative_pos < clause_left or tokens[comparative_pos] != "better":
+        return False
+    cue_positions = [
         idx
-        for idx in range(max(clause_left, start - 2), start)
-        if tokens[idx] in {"better", "best"}
+        for idx in range(
+            max(clause_left, comparative_pos - _COMPARISON_CUE_WINDOW), comparative_pos
+        )
+        if tokens[idx] in _COMPARISON_RELATION_CUES
     ]
-    if not comparative_positions:
+    if not cue_positions:
         return False
-    comparative_pos = max(comparative_positions)
-
-    elsewhere_positions = [idx for idx in range(end, clause_right) if tokens[idx] == "elsewhere"]
-    if not elsewhere_positions:
+    cue_pos = max(cue_positions)
+    subject_positions = [
+        idx
+        for idx in range(max(clause_left, cue_pos - _IMPLICIT_SUBJECT_WINDOW), cue_pos)
+        if tokens[idx] in _DIRECT_COMPARISON_EXPERIENCERS
+    ]
+    if not subject_positions:
         return False
-    elsewhere_pos = min(elsewhere_positions)
+    subject_pos = max(subject_positions)
+    if any(token not in _IMPLICIT_SUBJECT_BRIDGE for token in tokens[subject_pos + 1 : cue_pos]):
+        return False
 
-    relation_span = tokens[clause_left : elsewhere_pos + 1]
-    return (
-        _count_any(relation_span, _NEGATORS) == 0
-        and comparative_pos < start <= end <= elsewhere_pos
-    )
+    external_spans = [
+        (position, position + len(phrase.split()))
+        for phrase in _DIRECTIONAL_EXTERNAL_PHRASES
+        for position in _phrase_positions(tokens, phrase)
+        if end <= position and position + len(phrase.split()) <= clause_right
+    ]
+    if not external_spans:
+        return False
+    external_start, external_end = min(external_spans)
+
+    return start <= end <= external_start
+
+
+def _explicit_comparison_direction(
+    text_list: Sequence[object], aspect_post: Sequence[int]
+) -> tuple[float, float]:
+    """Return positive/negative flags for one clear, unnegated ``than`` relation."""
+    tokens = [_clause_token(token) for token in text_list]
+    raw_start, raw_end = aspect_post
+    start = min(max(raw_start, 0), len(tokens))
+    end = min(max(raw_end, start), len(tokens))
+    relation_left, relation_right = _relation_bounds(tokens, start, end)
+    relation = tokens[relation_left:relation_right]
+    if _count_any(relation, _NEGATORS) > 0:
+        return 0.0, 0.0
+
+    positive_comparatives = set(_POSITIVE_COMPARATIVES)
+    negative_comparatives = set(_NEGATIVE_COMPARATIVES)
+    aspect_tokens = tokens[start:end]
+    if any(token in _MONETARY_AMOUNT_ASPECT_TERMS for token in aspect_tokens):
+        positive_comparatives.update(_PRICE_POSITIVE_COMPARATIVES)
+        negative_comparatives.update(_PRICE_NEGATIVE_COMPARATIVES)
+    elif any(token in _VALUE_ASPECT_TERMS for token in aspect_tokens):
+        positive_comparatives.update(_VALUE_POSITIVE_COMPARATIVES)
+        negative_comparatives.update(_VALUE_NEGATIVE_COMPARATIVES)
+    clear_comparatives = positive_comparatives | negative_comparatives
+
+    candidates: list[tuple[int, int, int, bool]] = []
+    for than_pos in range(relation_left, relation_right):
+        if tokens[than_pos] != "than":
+            continue
+        comparative_positions = [
+            idx for idx in range(relation_left, than_pos) if tokens[idx] in clear_comparatives
+        ]
+        if not comparative_positions:
+            continue
+        comparative_pos = max(comparative_positions)
+        if end <= comparative_pos and comparative_pos - end <= _EXPLICIT_TARGET_WINDOW:
+            aspect_is_left_target = True
+            distance = comparative_pos - end
+        elif start > than_pos and start - than_pos <= _EXPLICIT_TARGET_WINDOW:
+            aspect_is_left_target = False
+            distance = start - than_pos
+        else:
+            continue
+        candidates.append((distance, comparative_pos, than_pos, aspect_is_left_target))
+
+    if candidates:
+        _, comparative_pos, _, aspect_is_left_target = min(candidates)
+        positive_comparative = tokens[comparative_pos] in positive_comparatives
+        current_is_positive = positive_comparative == aspect_is_left_target
+        return (1.0, 0.0) if current_is_positive else (0.0, 1.0)
+
+    return 0.0, 0.0
 
 
 def extract_pragmatic_features(
@@ -217,9 +388,9 @@ def extract_pragmatic_features(
             pos_tags.append(raw_pos_tags[idx])
     start = min(max(start, 0), len(tokens))
     end = min(max(end, start), len(tokens))
+    direct_negative_comparison = _direct_negative_external_comparison(text_list, aspect_post)
+    explicit_positive, explicit_negative = _explicit_comparison_direction(text_list, aspect_post)
     window = _aspect_window(tokens, start, end, radius=5)
-    left = tokens[:start]
-    right = tokens[end:]
 
     listing_verbs = {
         "include",
@@ -371,9 +542,11 @@ def extract_pragmatic_features(
         "chinatown",
         "by nyc standards",
     ]
-    price_terms = {"price", "prices", "priced", "value", "deal", "bill", "cost", "bucks"}
+    price_terms = _PRICE_CONTEXT_TERMS
 
     values = {name: 0.0 for name in PRAGMATIC_V3_FEATURE_NAMES}
+    values["current_positive_comparison"] = explicit_positive
+    values["current_negative_comparison"] = explicit_negative
     values["fact_listing"] = float(any(token in listing_verbs for token in tokens))
     values["there_be_existence"] = float(
         "there" in tokens and any(token in {"is", "are", "was", "were", "s"} for token in tokens)
@@ -398,42 +571,33 @@ def extract_pragmatic_features(
     external_ref = any(_contains_phrase(tokens, phrase) for phrase in external_phrases)
     values["external_reference"] = float(external_ref)
     if better_idx >= 0:
-        if external_ref and (
-            _contains_phrase(tokens, "at home")
-            or _contains_phrase(tokens, "at a mall")
-            or _contains_phrase(tokens, "food court")
-            or _contains_phrase(tokens, "local grocery store")
-        ):
-            values["current_negative_comparison"] = 1.0
         if than_idx >= 0 and start > than_idx:
             values["aspect_after_than"] = 1.0
-            if _count_any(window + right[:4], negative_words) > 0:
-                values["current_negative_comparison"] = 1.0
-        if _contains_phrase(tokens, "anywhere else") and _count_any(window, price_terms) > 0:
-            values["current_positive_comparison"] = 1.0
-        if _count_any(window, price_terms) > 0 and any(
-            token in {"cheap", "cheaper", "low", "lower"} for token in tokens
+        if (
+            than_idx < 0
+            and _count_any(window, price_terms) > 0
+            and any(token in {"cheap", "cheaper", "low", "lower"} for token in tokens)
         ):
             values["current_positive_comparison"] = 1.0
-    if "make" in left and "better" in right and _contains_phrase(tokens, "at home"):
+    if direct_negative_comparison:
         values["current_negative_comparison"] = 1.0
+    if explicit_positive or explicit_negative:
+        values["current_positive_comparison"] = explicit_positive
+        values["current_negative_comparison"] = explicit_negative
 
-    aspect_is_price = any(token in price_terms for token in tokens[start:end])
-    if aspect_is_price and (
-        _count_any(
-            window + tokens,
-            {"cheap", "cheaper", "free", "value", "deal", "worth", "low", "lower"},
-        )
-        > 0
-    ):
-        values["price_positive"] = 1.0
+    aspect_is_price = any(token in _MONETARY_AMOUNT_ASPECT_TERMS for token in tokens[start:end])
     if (
         aspect_is_price
-        and _contains_phrase(tokens, "anywhere else")
-        and any(token in {"high", "higher"} for token in tokens)
+        and than_idx < 0
+        and (
+            _count_any(
+                window + tokens,
+                {"cheap", "cheaper", "free", "value", "deal", "worth", "low", "lower"},
+            )
+            > 0
+        )
     ):
         values["price_positive"] = 1.0
-
     if use_v3:
         low_subjectivity_descriptors = {
             "classic",
@@ -486,19 +650,6 @@ def extract_pragmatic_features(
             "dieters",
             "guests",
         }
-        external_location_phrases = [
-            "at home",
-            "at a mall",
-            "mall food court",
-            "food court",
-            "local grocery store",
-            "anywhere else",
-            "other restaurants",
-            "other places",
-            "elsewhere",
-            "by nyc standards",
-        ]
-        external_brand_phrases = ["big mac", "mcdonalds", "mcdonald"]
         clause_left, clause_right = _clause_bounds(tokens, start, end)
         same_clause = tokens[clause_left:clause_right]
 
@@ -591,42 +742,13 @@ def extract_pragmatic_features(
         )
         opinion_render = min(1.0, opinion_render + 0.25 * human_experiencer + 0.30 * beneficiary)
 
-        external_location_pos = _first_phrase_position(tokens, external_location_phrases)
-        external_brand_pos = _first_phrase_position(tokens, external_brand_phrases)
-        external_pos = min(
-            [pos for pos in (external_location_pos, external_brand_pos) if pos >= 0],
-            default=-1,
-        )
-        than_pos = _nearest_index(tokens, {"than"})
-        comparison_current_positive = 0.0
-        comparison_current_negative = 0.0
-        if than_pos >= 0 and external_pos >= 0:
-            if (
-                end <= than_pos
-                and external_pos > than_pos
-                and _count_any(tokens, {"better", "best", "cheaper", "lower"}) > 0
-            ):
-                comparison_current_positive = 1.0
-            if start > than_pos and _count_any(tokens, {"better", "best"}) > 0:
-                comparison_current_negative = 1.0
-        if external_pos >= 0 and _count_any(tokens, {"better", "best"}) > 0:
-            if (
-                _contains_phrase(tokens, "at home")
-                or _contains_phrase(tokens, "at a mall")
-                or _contains_phrase(tokens, "food court")
-            ):
-                comparison_current_negative = 1.0
-        if _contains_phrase(tokens, "make better") and _contains_phrase(tokens, "at home"):
+        comparison_current_positive = explicit_positive
+        comparison_current_negative = explicit_negative
+        if direct_negative_comparison:
             comparison_current_negative = 1.0
-        if (
-            _contains_phrase(tokens, "anywhere else")
-            and _count_any(tokens, price_terms) > 0
-            and _count_any(tokens, {"high", "higher"}) > 0
-        ):
-            comparison_current_positive = 1.0
-            comparison_current_negative = 0.0
-        if than_pos < 0 and _direct_better_elsewhere(text_list, aspect_post):
-            comparison_current_negative = 1.0
+        if explicit_positive or explicit_negative:
+            comparison_current_positive = explicit_positive
+            comparison_current_negative = explicit_negative
 
         values["relation_fact_object_score"] = fact_object_score
         values["relation_object_list_density"] = object_list_density

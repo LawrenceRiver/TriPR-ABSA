@@ -23,6 +23,13 @@ def _validate_logits(logits: torch.Tensor) -> None:
         raise ValueError("logits final dimension must be 3: positive, negative, neutral")
 
 
+def _validate_single_logits(logits: torch.Tensor) -> None:
+    if not isinstance(logits, torch.Tensor):
+        raise TypeError("logits must be a torch.Tensor")
+    if logits.ndim != 1 or logits.shape[0] != 3:
+        raise ValueError("single-sample logits must have shape [3]")
+
+
 def _validate_sample(sample: Mapping[str, Any]) -> None:
     missing = [name for name in REQUIRED_SAMPLE_FIELDS if name not in sample]
     if missing:
@@ -99,7 +106,7 @@ def apply_pragmatic_residual(
     return_details: bool = False,
 ) -> torch.Tensor | tuple[torch.Tensor, dict[str, Any]]:
     """Apply selected residual modules to one sample's logits."""
-    _validate_logits(logits)
+    _validate_single_logits(logits)
     _validate_sample(sample)
     selected = _as_tuple(modules)
     return _apply_selected_modules(

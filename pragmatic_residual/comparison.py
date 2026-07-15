@@ -46,17 +46,24 @@ def comparison_residual(
     adj = torch.zeros(3, dtype=probs.dtype, device=probs.device)
     actions: list[str] = []
 
-    comp_pos = max(
+    directional_pos = max(
         _value(old, PRAGMATIC_FEATURE_NAMES, "current_positive_comparison"),
-        _value(old, PRAGMATIC_FEATURE_NAMES, "price_positive")
-        * _value(old, PRAGMATIC_FEATURE_NAMES, "external_reference"),
         _value(v3, PRAGMATIC_V3_FEATURE_NAMES, "relation_comparison_current_positive"),
     )
-    comp_neg = max(
+    directional_neg = max(
         _value(old, PRAGMATIC_FEATURE_NAMES, "current_negative_comparison"),
-        _value(old, PRAGMATIC_FEATURE_NAMES, "aspect_after_than"),
         _value(v3, PRAGMATIC_V3_FEATURE_NAMES, "relation_comparison_current_negative"),
     )
+    if directional_pos > 0 and directional_neg > 0:
+        return adj, actions
+    if directional_pos > 0 or directional_neg > 0:
+        comp_pos = directional_pos
+        comp_neg = directional_neg
+    else:
+        comp_pos = _value(old, PRAGMATIC_FEATURE_NAMES, "price_positive") * _value(
+            old, PRAGMATIC_FEATURE_NAMES, "external_reference"
+        )
+        comp_neg = 0.0
 
     if comp_pos > 0:
         adj[0] += 2.00 * comp_pos

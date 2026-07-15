@@ -15,8 +15,7 @@ EXPECTED_EXPERIMENTS = [
         "split": "test",
         "aggregation": "mean of three selected checkpoints",
         "source": (
-            "internal project evaluation: strategy ablation table and selected-checkpoint "
-            "summary"
+            "internal project evaluation: strategy ablation table and selected-checkpoint summary"
         ),
         "limitations": (
             "Reported result from 3 selected checkpoints; not independently rerun during release "

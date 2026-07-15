@@ -221,3 +221,10 @@ def test_readme_badges_are_real_and_limited_to_the_allowed_set() -> None:
     assert CI_WORKFLOW.is_file()
     for document in READMES:
         assert badge_lines(document) == EXPECTED_BADGES
+
+
+def test_ci_uses_an_explicit_cache_dependency_file() -> None:
+    workflow = CI_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "cache: pip" in workflow
+    assert "cache-dependency-path: requirements-dev.txt" in workflow

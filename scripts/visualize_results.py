@@ -30,8 +30,8 @@ PUBLIC_FIGURE_NAMES = (
 def load_results(path: Path) -> dict:
     """Load and validate the public result document needed by this figure."""
     data = json.loads(path.read_text(encoding="utf-8"))
-    if data.get("schema_version") != 1:
-        raise ValueError("reported metrics must use schema version 1")
+    if data.get("schema_version") != 2:
+        raise ValueError("reported metrics must use schema version 2")
     experiments = data.get("experiments")
     required_ids = {*CROSS_DOMAIN_EXPERIMENT_IDS, MULTI_BACKBONE_EXPERIMENT_ID}
     experiment_ids = (

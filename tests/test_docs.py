@@ -228,3 +228,24 @@ def test_ci_uses_an_explicit_cache_dependency_file() -> None:
 
     assert "cache: pip" in workflow
     assert "cache-dependency-path: requirements-dev.txt" in workflow
+
+
+def test_public_docs_include_ablation_analysis_and_limitations() -> None:
+    english = (ROOT / "README.md").read_text(encoding="utf-8")
+    chinese = (ROOT / "README.zh-CN.md").read_text(encoding="utf-8")
+    results = (ROOT / "docs" / "results.md").read_text(encoding="utf-8")
+
+    assert "Module ablation and limitations" in english
+    assert all(term in english for term in ("Changed", "Fixed", "Broken"))
+    assert "模块消融与限制" in chinese
+    assert all(term in chinese for term in ("改动", "修正", "新增错误"))
+    assert "## Main Restaurant comparison (Table I)" in results
+    assert "## Module ablation (Table II)" in results
+    assert "## Baseline error analysis (Table III)" in results
+    assert "## Cross-domain generalization (Table IV)" in results
+    assert "## Limitations" in results
+    assert "| TextGT-BERT + all | **0.8424 +/- 0.0223**" in results
+    assert "| neutral -> positive | 51 | 33.8% |" in results
+    assert "| far context | 114 |" in results
+    for document in (english, chinese):
+        assert all(value in document for value in ("+0.0067", "8.00", "6.00", "1.33"))

@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "class_order": ["positive", "negative", "neutral"],
   "experiments": [
     {
@@ -88,5 +88,66 @@
         {"name": "parallel-gt", "accuracy": 0.8275, "macro_f1": 0.7514, "best_strategy": "fact+comparison", "residual_accuracy": 0.8365, "residual_macro_f1": 0.7737}
       ]
     }
-  ]
+  ],
+  "paper_tables": {
+    "restaurant_main_comparison": {
+      "source": "internal project report, Table I",
+      "aggregation": "mean and standard deviation over three random seeds",
+      "release_status": "reported, not rerun during release preparation",
+      "rows": [
+        {"name": "Text-Transformer", "accuracy_mean": 0.8022, "accuracy_std": 0.0021, "macro_f1_mean": 0.6914, "macro_f1_std": 0.0101, "delta_macro_f1": -0.0566},
+        {"name": "Text-GT", "accuracy_mean": 0.8067, "accuracy_std": 0.0078, "macro_f1_mean": 0.7023, "macro_f1_std": 0.0165, "delta_macro_f1": -0.0457},
+        {"name": "BERT-SPC", "accuracy_mean": 0.8389, "accuracy_std": 0.0101, "macro_f1_mean": 0.7588, "macro_f1_std": 0.0156, "delta_macro_f1": 0.0108},
+        {"name": "AEN-BERT", "accuracy_mean": 0.8034, "accuracy_std": 0.0118, "macro_f1_mean": 0.6826, "macro_f1_std": 0.0186, "delta_macro_f1": -0.0654},
+        {"name": "LCF-BERT", "accuracy_mean": 0.8332, "accuracy_std": 0.0078, "macro_f1_mean": 0.7482, "macro_f1_std": 0.0142, "delta_macro_f1": 0.0001},
+        {"name": "TextGT-BERT", "accuracy_mean": 0.8383, "accuracy_std": 0.0176, "macro_f1_mean": 0.7480, "macro_f1_std": 0.0395, "delta_macro_f1": null},
+        {"name": "TextGT-BERT + fact", "accuracy_mean": 0.8406, "accuracy_std": 0.0209, "macro_f1_mean": 0.7522, "macro_f1_std": 0.0445, "delta_macro_f1": 0.0042},
+        {"name": "TextGT-BERT + comparison", "accuracy_mean": 0.8394, "accuracy_std": 0.0172, "macro_f1_mean": 0.7499, "macro_f1_std": 0.0384, "delta_macro_f1": 0.0019},
+        {"name": "TextGT-BERT + intensity", "accuracy_mean": 0.8388, "accuracy_std": 0.0194, "macro_f1_mean": 0.7488, "macro_f1_std": 0.0424, "delta_macro_f1": 0.0008},
+        {"name": "TextGT-BERT + fact+comparison", "accuracy_mean": 0.8418, "accuracy_std": 0.0205, "macro_f1_mean": 0.7541, "macro_f1_std": 0.0434, "delta_macro_f1": 0.0060},
+        {"name": "TextGT-BERT + all", "accuracy_mean": 0.8424, "accuracy_std": 0.0223, "macro_f1_mean": 0.7547, "macro_f1_std": 0.0465, "delta_macro_f1": 0.0067}
+      ],
+      "notes": [
+        "Table I reports TextGT-BERT baseline accuracy as 0.8383; Table II reports 0.8382. Both values are preserved as originally reported.",
+        "No statistical significance test was independently verified during release preparation."
+      ]
+    },
+    "restaurant_module_ablation": {
+      "source": "internal project report, Table II",
+      "aggregation": "same TextGT-BERT checkpoints and test split; changed, fixed, and broken are checkpoint means",
+      "release_status": "reported, not rerun during release preparation",
+      "rows": [
+        {"name": "fact", "base_accuracy": 0.8382, "accuracy": 0.8406, "base_macro_f1": 0.7480, "macro_f1": 0.7522, "delta_macro_f1": 0.0042, "changed": 4.33, "fixed": 3.33, "broken": 0.67},
+        {"name": "comparison", "base_accuracy": 0.8382, "accuracy": 0.8394, "base_macro_f1": 0.7480, "macro_f1": 0.7499, "delta_macro_f1": 0.0019, "changed": 1.33, "fixed": 1.33, "broken": 0.00},
+        {"name": "intensity", "base_accuracy": 0.8382, "accuracy": 0.8388, "base_macro_f1": 0.7480, "macro_f1": 0.7488, "delta_macro_f1": 0.0008, "changed": 2.67, "fixed": 1.33, "broken": 0.67},
+        {"name": "fact+comparison", "base_accuracy": 0.8382, "accuracy": 0.8418, "base_macro_f1": 0.7480, "macro_f1": 0.7541, "delta_macro_f1": 0.0060, "changed": 5.67, "fixed": 4.67, "broken": 0.67},
+        {"name": "all", "base_accuracy": 0.8382, "accuracy": 0.8424, "base_macro_f1": 0.7480, "macro_f1": 0.7547, "delta_macro_f1": 0.0067, "changed": 8.00, "fixed": 6.00, "broken": 1.33}
+      ]
+    },
+    "restaurant_baseline_errors": {
+      "source": "internal project report, Table III",
+      "total_errors": 151,
+      "error_pairs": [
+        {"gold": "neutral", "predicted": "positive", "count": 51, "percentage": 33.8},
+        {"gold": "positive", "predicted": "neutral", "count": 30, "percentage": 19.9},
+        {"gold": "positive", "predicted": "negative", "count": 20, "percentage": 13.2},
+        {"gold": "negative", "predicted": "neutral", "count": 20, "percentage": 13.2},
+        {"gold": "neutral", "predicted": "negative", "count": 16, "percentage": 10.6},
+        {"gold": "negative", "predicted": "positive", "count": 14, "percentage": 9.3}
+      ],
+      "error_buckets": [
+        {"name": "far_context", "count": 114},
+        {"name": "multi_aspect", "count": 112},
+        {"name": "long_sentence", "count": 41},
+        {"name": "negation", "count": 40},
+        {"name": "contrast", "count": 24},
+        {"name": "intensifier", "count": 16},
+        {"name": "comparative", "count": 13},
+        {"name": "plain", "count": 13},
+        {"name": "hedge", "count": 9},
+        {"name": "weak_praise", "count": 5}
+      ],
+      "bucket_note": "Reported bucket counts exceed the total error count when summed. Treat buckets as overlapping or non-exclusive until raw assignments are audited."
+    }
+  }
 }

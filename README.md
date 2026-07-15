@@ -82,6 +82,32 @@ checkpoints. Machine-readable values are stored in
 | All residuals | 0.8424 | 0.7547 |
 
 <details>
+<summary>Module ablation and limitations</summary>
+
+All variants use the same TextGT-BERT checkpoints and test split. `Changed`,
+`Fixed`, and `Broken` are reported checkpoint means.
+
+| Strategy | Accuracy | Macro-F1 | Delta F1 | Changed | Fixed | Broken |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Fact | 0.8406 | 0.7522 | +0.0042 | 4.33 | 3.33 | 0.67 |
+| Comparison | 0.8394 | 0.7499 | +0.0019 | 1.33 | 1.33 | 0.00 |
+| Intensity | 0.8388 | 0.7488 | +0.0008 | 2.67 | 1.33 | 0.67 |
+| Fact + comparison | 0.8418 | 0.7541 | +0.0060 | 5.67 | 4.67 | 0.67 |
+| All residuals | 0.8424 | 0.7547 | +0.0067 | 8.00 | 6.00 | 1.33 |
+
+Fact is the strongest single branch. Comparison changes fewer samples and has
+no broken cases in the reported mean. The full adapter gives the best combined
+result but can still over-correct individual samples.
+
+The reported gain is modest (`+0.0067` Macro-F1), cross-domain results are mixed,
+and the current method uses handcrafted cues and fixed residual weights. The
+results were not independently rerun during release preparation. The full
+tables, baseline error distribution, reporting inconsistencies, and limitation
+notes are in [docs/results.md](docs/results.md).
+
+</details>
+
+<details>
 <summary>Cross-domain and multi-backbone figures</summary>
 
 ![Cross-domain Macro-F1](assets/figures/cross-domain.png)

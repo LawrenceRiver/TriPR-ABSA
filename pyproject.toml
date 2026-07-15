@@ -1,16 +1,38 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "textgt-pragmatic-residual"
+name = "tripr-absa"
 version = "0.1.0"
-description = "A pragmatic residual layer for three-class aspect-based sentiment analysis"
+description = "Tri-branch pragmatic residual adaptation for aspect-based sentiment analysis"
+readme = "README.md"
 requires-python = ">=3.9,<3.11"
+license = "MIT"
+license-files = ["LICENSE", "NOTICE", "AUTHORS.md"]
+keywords = ["absa", "sentiment-analysis", "nlp", "pragmatic-reasoning", "textgt"]
+authors = [
+  { name = "Lawrence River" },
+  { name = "QCYTSN" },
+  { name = "jason0917-eng" },
+]
 dependencies = [
   "numpy==1.24.3",
   "torch==1.12.1",
 ]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+[project.urls]
+Homepage = "https://github.com/LawrenceRiver/TriPR-ABSA"
+Repository = "https://github.com/LawrenceRiver/TriPR-ABSA"
+Documentation = "https://github.com/LawrenceRiver/TriPR-ABSA#readme"
+Issues = "https://github.com/LawrenceRiver/TriPR-ABSA/issues"
 
 [tool.setuptools.packages.find]
 include = ["pragmatic_residual*"]

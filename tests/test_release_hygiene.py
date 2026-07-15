@@ -14,6 +14,11 @@ ROOT = Path(__file__).resolve().parents[1]
         "tests/test_apply.pyd",
         ".DS_Store",
         "assets/.DS_Store",
+        ".env",
+        ".env.local",
+        "private-key.pem",
+        "credentials-local.json",
+        "secrets-development.json",
     ],
 )
 def test_generated_local_files_are_ignored(path: str) -> None:

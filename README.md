@@ -1,10 +1,15 @@
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-# TextGT Pragmatic Residual Adapter
+# TriPR-ABSA
 
-An independent TextGT research fork that adds a model-agnostic pragmatic residual to three-class aspect-based sentiment logits.
+**Tri-Branch Pragmatic Residual Adaptation for Aspect-Based Sentiment Analysis**
 
-[![CI](https://github.com/LawrenceRiver/TextGT/actions/workflows/ci.yml/badge.svg)](https://github.com/LawrenceRiver/TextGT/actions/workflows/ci.yml)
+TriPR-ABSA adds three lightweight pragmatic residual branches to an existing
+three-class ABSA model. It leaves the backbone unchanged and corrects its logits
+for fact-opinion boundaries, comparison direction, and sentiment intensity.
+
+[![CI](https://github.com/LawrenceRiver/TriPR-ABSA/actions/workflows/ci.yml/badge.svg)](https://github.com/LawrenceRiver/TriPR-ABSA/actions/workflows/ci.yml)
+![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-0b77be)
 ![Python 3.9 and 3.10](https://img.shields.io/badge/Python-3.9%20%7C%203.10-3776AB?logo=python&logoColor=white)
 ![PyTorch 1.12.1](https://img.shields.io/badge/PyTorch-1.12.1-EE4C2C?logo=pytorch&logoColor=white)
 [![MIT software license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -13,37 +18,59 @@ An independent TextGT research fork that adds a model-agnostic pragmatic residua
 
 ## Upstream relationship
 
-This repository is an independent research fork of [shuoyinn/TextGT](https://github.com/shuoyinn/TextGT). It is maintained separately and is not endorsed by or affiliated with the upstream authors. The original implementation and citation remain credited in [NOTICE](NOTICE).
+This repository is an independent research fork of
+[shuoyinn/TextGT](https://github.com/shuoyinn/TextGT). TextGT-BERT is the main
+baseline used in the reported experiments; TriPR-ABSA is the residual method
+built on top of its logits. The project is maintained separately and is not an
+official TextGT release. Upstream code and paper attribution are retained in
+[NOTICE](NOTICE).
 
 ## Architecture
 
-![TextGT pragmatic residual architecture](assets/architecture.png)
+![TriPR-ABSA architecture](assets/architecture.png)
 
-The adapter reads a backbone's three logits and one parsed sample. It returns adjusted logits without changing the backbone. The full interface and equations are in [docs/method.md](docs/method.md).
+The adapter receives backbone logits and one parsed sample. The three residual
+branches run in sequence, and the composer adds their corrections at logit
+level. No backbone layer is replaced or retrained by this package. See
+[docs/method.md](docs/method.md) for the interface, equations, and error
+contracts.
 
 ## Method
 
-The class order is `positive`, `negative`, `neutral`.
+TriPR-ABSA uses the class order `positive`, `negative`, `neutral`.
 
 ### Fact
 
-The fact module detects objective listings and descriptions near the aspect. Under its confidence gates, it moves a positive prediction toward neutral.
+The fact-opinion branch looks for objective listings and descriptions around the
+current aspect. When the baseline is positive but the evidence is primarily
+factual, the branch shifts probability toward neutral.
 
 ### Comparison
 
-The comparison module resolves whether the current aspect wins or loses an explicit comparison, then adjusts positive and negative logits in that direction.
+The comparison branch determines whether the current aspect wins or loses an
+explicit comparison. It handles direction words and external references before
+adjusting the positive and negative logits.
 
 ### Intensity
 
-The intensity module matches phrases from a validated train-split prior. It accounts for local negation, clause boundaries, distance, and aspect scope. With no prior, this module is a no-op.
+The intensity branch matches phrases from a validated train-split prior. Phrase
+scope, local negation, token distance, and the current aspect all affect the
+residual. Without a prior, this branch is a no-op.
 
 ### Composer
 
-The composer applies selected modules in order. Each module sees probabilities from the logits produced by the preceding module. The public entry points are `apply_pragmatic_residual`, `apply_batch`, and `load_prior`.
+The composer applies selected branches in the order `fact`, `comparison`,
+`intensity`. Each branch sees probabilities derived from the logits produced by
+the previous branch. Public entry points are `apply_pragmatic_residual`,
+`apply_batch`, and `load_prior`.
 
 ## Reported Restaurant results
 
-The primary SemEval-2014 Restaurant test table is the mean of three selected checkpoints. Values come from [results/reported_metrics.json](results/reported_metrics.json).
+![Macro-F1 comparison of residual strategies](assets/figures/strategy-comparison.png)
+
+The primary SemEval-2014 Restaurant table reports the mean of three selected
+checkpoints. Machine-readable values are stored in
+[results/reported_metrics.json](results/reported_metrics.json).
 
 | Strategy | Accuracy | Macro-F1 |
 | --- | ---: | ---: |
@@ -52,9 +79,20 @@ The primary SemEval-2014 Restaurant test table is the mean of three selected che
 | Comparison | 0.8394 | 0.7499 |
 | Intensity | 0.8388 | 0.7488 |
 | Fact + comparison | 0.8418 | 0.7541 |
-| All | 0.8424 | 0.7547 |
+| All residuals | 0.8424 | 0.7547 |
 
-Reported result from 3 selected checkpoints; not independently rerun during release preparation and not a state-of-the-art claim. Laptop, Twitter, and multi-backbone tables with their limits are in [docs/results.md](docs/results.md).
+<details>
+<summary>Cross-domain and multi-backbone figures</summary>
+
+![Cross-domain Macro-F1](assets/figures/cross-domain.png)
+
+![Residual compatibility across backbones](assets/figures/multi-backbone.png)
+
+</details>
+
+These numbers were not independently rerun during release preparation and are
+not presented as a state-of-the-art claim. Dataset-specific limits and the full
+tables are documented in [docs/results.md](docs/results.md).
 
 ## Installation
 
@@ -67,13 +105,24 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-For development checks, install `requirements-dev.txt`. Full upstream model training uses `requirements.txt` and separately obtained datasets and model resources.
+Install `requirements-dev.txt` to run the checks. Full upstream model training
+uses `requirements.txt` and separately obtained datasets and model resources.
+This repository does not redistribute datasets or pretrained checkpoints.
+Follow the [upstream preparation instructions](https://github.com/shuoyinn/TextGT#priliminaries)
+for the TextGT baseline.
 
-Datasets are not redistributed here. Follow the [upstream preparation instructions](https://github.com/shuoyinn/TextGT#priliminaries). The upstream code and datasets credit [DualGCN](https://github.com/CCChenhao997/DualGCN-ABSA), [ABSA-PyTorch](https://github.com/songyouwei/ABSA-PyTorch), and [CDT_ABSA](https://github.com/Guangzidetiaoyue/CDT_ABSA); compatible preprocessed datasets are also available from [SSEGCN](https://github.com/zhangzheng1997/SSEGCN-ABSA). Preparing data from source requires [Stanford CoreNLP](https://stanfordnlp.github.io/CoreNLP/). Non-BERT training also requires [Stanford GloVe](https://nlp.stanford.edu/projects/glove/), specifically `glove.840B.300d.zip` for the upstream commands.
+The upstream code and datasets also credit
+[DualGCN](https://github.com/CCChenhao997/DualGCN-ABSA),
+[ABSA-PyTorch](https://github.com/songyouwei/ABSA-PyTorch), and
+[CDT_ABSA](https://github.com/Guangzidetiaoyue/CDT_ABSA). Compatible
+preprocessed datasets are available from
+[SSEGCN](https://github.com/zhangzheng1997/SSEGCN-ABSA). Source preprocessing
+requires [Stanford CoreNLP](https://stanfordnlp.github.io/CoreNLP/); non-BERT
+training also uses [Stanford GloVe](https://nlp.stanford.edu/projects/glove/).
 
 ## Quick start
 
-This example uses only the comparison module, so it does not need a phrase prior.
+This example enables the comparison branch and does not require a phrase prior.
 
 ```python
 import torch
@@ -100,19 +149,20 @@ print(details["actions"])
 
 ## Configuration
 
-The residual API uses the fixed class order `positive`, `negative`, `neutral`.
-Pass any subset of `("fact", "comparison", "intensity")` through `modules`; the
-composer applies them in that order. The `prior` argument accepts either a
-validated mapping or a JSON path created by `scripts/build_phrase_prior.py`.
-Without a prior, the intensity module is a no-op.
+Pass any subset of `("fact", "comparison", "intensity")` through `modules`.
+With `modules=None`, all three branches run in their default order. The `prior`
+argument accepts a validated mapping or a JSON path produced by
+`scripts/build_phrase_prior.py`. The intensity branch is disabled when no prior
+is supplied.
 
-The default prior builder is offline. `DEEPSEEK_API_KEY` is read only when
-`--provider deepseek` is selected for optional remote phrase annotation. It is
-not required for inference, testing, visualization, or the offline builder.
+The prior builder is offline by default. `DEEPSEEK_API_KEY` is read only when
+`--provider deepseek` is selected for optional remote phrase annotation. The
+key is not needed for inference, tests, visualization, or the offline builder.
 
 ## Prior construction
 
-The builder reads the training split only. Its default provider is offline and makes no network request:
+The builder reads the training split only. Its default provider makes no network
+request:
 
 ```bash
 python scripts/build_phrase_prior.py \
@@ -120,7 +170,9 @@ python scripts/build_phrase_prior.py \
   --output artifacts/restaurant-train-prior.json
 ```
 
-DeepSeek annotation is optional. It sends train-derived phrase candidates and aggregate counts to the configured API, not complete dataset rows or labels. The API key is read from an environment variable and is never written to the prior:
+Optional DeepSeek annotation sends train-derived phrase candidates and aggregate
+counts, not complete dataset rows or labels. Supply the key through the process
+environment; never place it in a source file or configuration committed to Git.
 
 ```bash
 export DEEPSEEK_API_KEY="your-key"
@@ -130,26 +182,30 @@ python scripts/build_phrase_prior.py \
   --output artifacts/restaurant-train-prior.json
 ```
 
-Using the remote path is subject to the provider's privacy policy and service terms.
+Use of the remote provider is subject to its privacy policy and service terms.
 
 ## Reproducibility
 
-[docs/reproducibility.md](docs/reproducibility.md) lists the CPU checks, upstream GPU baseline commands, data preparation links, and offline prior command. Reported metrics are stored in a machine-readable file rather than inferred from the figures.
+[docs/reproducibility.md](docs/reproducibility.md) lists CPU checks, upstream GPU
+baseline commands, data preparation links, and the offline prior command. The
+release keeps reported metrics in JSON rather than inferring them from figures.
 
 ## Contributors
 
-Software and figure contributors are listed in [AUTHORS.md](AUTHORS.md).
-Contributions should follow [CONTRIBUTING.md](CONTRIBUTING.md).
+TriPR-ABSA is maintained by Lawrence River, QCYTSN, and jason0917-eng. Roles are
+listed in [AUTHORS.md](AUTHORS.md). See [CONTRIBUTING.md](CONTRIBUTING.md) before
+submitting a change and [SECURITY.md](SECURITY.md) for private vulnerability
+reporting and credential handling.
 
 ## Citation
 
-[CITATION.cff](CITATION.cff) contains the software metadata and the upstream
-TextGT paper reference. GitHub and citation tools can read it directly.
+[CITATION.cff](CITATION.cff) contains the TriPR-ABSA software metadata and the
+upstream TextGT paper reference. Cite both when this repository and its baseline
+are used together.
 
 ## License
 
-The [MIT License](LICENSE) applies to the upstream software and this repository's
-software modifications. Third-party datasets, pretrained models, and GloVe
-resources retain their own terms. Original architecture and result figures
-remain copyrighted by their contributors unless separately licensed. See
-[NOTICE](NOTICE) for attribution and boundaries.
+The [MIT License](LICENSE) covers the upstream software and the software changes
+in this repository. Third-party datasets, pretrained models, and GloVe resources
+retain their own terms. The original project figures remain copyrighted by their
+contributors; see [NOTICE](NOTICE) for attribution and reuse boundaries.

@@ -1,4 +1,4 @@
-# Pragmatic residual method
+# TriPR-ABSA method
 
 The package adjusts logits produced by a three-class aspect-based sentiment
 classifier. It does not train, wrap, or modify the classifier.

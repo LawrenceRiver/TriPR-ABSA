@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 READMES = (ROOT / "README.md", ROOT / "README.zh-CN.md")
 PUBLIC_MARKDOWN = (*READMES, *sorted((ROOT / "docs").glob("*.md")))
-REPOSITORY = "LawrenceRiver/TextGT"
+REPOSITORY = "LawrenceRiver/TriPR-ABSA"
 CI_WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 CI_BADGE = (
     f"[![CI](https://github.com/{REPOSITORY}/actions/workflows/ci.yml/badge.svg)]"
@@ -18,6 +18,7 @@ FORBIDDEN_PUBLIC_PHRASES = (
 )
 EXPECTED_BADGES = (
     CI_BADGE,
+    "![Version 0.1.0](https://img.shields.io/badge/version-0.1.0-0b77be)",
     (
         "![Python 3.9 and 3.10]"
         "(https://img.shields.io/badge/Python-3.9%20%7C%203.10-3776AB?"
@@ -153,6 +154,7 @@ def test_readmes_reference_public_release_artifacts() -> None:
         "CITATION.cff",
         "LICENSE",
         "NOTICE",
+        "SECURITY.md",
     }
     for document in READMES:
         assert required <= markdown_targets(document)
@@ -171,6 +173,17 @@ def test_release_attribution_files_agree() -> None:
         assert "10.1609/aaai.v38i17.29911" in text
         assert "CITATION.cff" in text
         assert "NOTICE" in text
+
+
+def test_package_metadata_uses_project_brand() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    citation = (ROOT / "CITATION.cff").read_text(encoding="utf-8")
+
+    assert 'name = "tripr-absa"' in pyproject
+    assert 'version = "0.1.0"' in pyproject
+    assert "TriPR-ABSA" in citation
+    assert f"https://github.com/{REPOSITORY}" in pyproject
+    assert all("version-0.1.0" in document.read_text(encoding="utf-8") for document in READMES)
 
 
 def test_release_is_paperless() -> None:
